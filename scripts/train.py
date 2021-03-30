@@ -179,7 +179,7 @@ def main(argv):
         # -----------------------------------------
         # test network
         # -----------------------------------------
-        if (iteration + 1) % conf.snapshot_iter == 0 and iteration > start_iter: # 每（conf.snapshot_iter =）5000次迭代进项一次测试
+        if (iteration + 1) % conf.snapshot_iter == 0 and iteration > start_iter:  # 每（conf.snapshot_iter =）5000次迭代进项一次测试
 
             # store checkpoint
             save_checkpoint(optimizer, rpn_net, paths.weights, (iteration + 1))

@@ -1645,12 +1645,12 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
         respath_3d = os.path.join(results_path.replace('/data', ''), 'stats_{}_detection_3d.txt'.format(lbl))
 
         if os.path.exists(respath_2d):
-            easy, mod, hard = parse_kitti_result(respath_2d, mode='old')
-
-            print_str = 'OLD_test_iter {} 2d {} --> easy: {:0.4f}, mod: {:0.4f}, hard: {:0.4f}'.format(test_iter, lbl,
-                                                                                                    easy, mod, hard)
-            if use_log: logging.info(print_str)
-            else: print(print_str)
+            # easy, mod, hard = parse_kitti_result(respath_2d, mode='old')
+            #
+            # print_str = 'OLD_test_iter {} 2d {} --> easy: {:0.4f}, mod: {:0.4f}, hard: {:0.4f}'.format(test_iter, lbl,
+            #                                                                                         easy, mod, hard)
+            # if use_log: logging.info(print_str)
+            # else: print(print_str)
 
             easy, mod, hard = parse_kitti_result(respath_2d)
 
@@ -1660,13 +1660,13 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
             else: print(print_str)
 
         if os.path.exists(respath_gr):
-            easy, mod, hard = parse_kitti_result(respath_gr, mode='old')
-
-            print_str = 'OLD_test_iter {} gr {} --> easy: {:0.4f}, mod: {:0.4f}, hard: {:0.4f}'.format(test_iter, lbl,
-                                                                                                    easy, mod, hard)
-
-            if use_log: logging.info(print_str)
-            else: print(print_str)
+            # easy, mod, hard = parse_kitti_result(respath_gr, mode='old')
+            #
+            # print_str = 'OLD_test_iter {} gr {} --> easy: {:0.4f}, mod: {:0.4f}, hard: {:0.4f}'.format(test_iter, lbl,
+            #                                                                                         easy, mod, hard)
+            #
+            # if use_log: logging.info(print_str)
+            # else: print(print_str)
 
             easy, mod, hard = parse_kitti_result(respath_gr)
 
@@ -1677,13 +1677,13 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
             else: print(print_str)
 
         if os.path.exists(respath_3d):
-            easy, mod, hard = parse_kitti_result(respath_3d, mode='old')
-
-            print_str = 'OLD_test_iter {} 3d {} --> easy: {:0.4f}, mod: {:0.4f}, hard: {:0.4f}'.format(test_iter, lbl,
-                                                                                                    easy, mod, hard)
-
-            if use_log: logging.info(print_str)
-            else: print(print_str)
+            # easy, mod, hard = parse_kitti_result(respath_3d, mode='old')
+            #
+            # print_str = 'OLD_test_iter {} 3d {} --> easy: {:0.4f}, mod: {:0.4f}, hard: {:0.4f}'.format(test_iter, lbl,
+            #                                                                                         easy, mod, hard)
+            #
+            # if use_log: logging.info(print_str)
+            # else: print(print_str)
 
             easy, mod, hard = parse_kitti_result(respath_3d)
 
