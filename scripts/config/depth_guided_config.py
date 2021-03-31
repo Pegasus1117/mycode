@@ -12,7 +12,7 @@ def Config():
 
     conf.model = 'resnet_dilate'
     conf.lr = 0.01            # 学习率
-    conf.max_iter = 40000     # 最大迭代数
+    conf.max_iter = 60000     # 最大迭代数
     conf.use_dropout = True
     conf.drop_channel = True
     conf.dropout_rate = 0.5
