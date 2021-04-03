@@ -4,9 +4,13 @@ import os
 # import torch.nn as nn
 # from torchvision import models
 import cv2
+import torch
+
+from lib.core import iou
+from lib.rpn_util import bbXYWH2Coords, bbCoords2XYWH
 
 
-def iou():
+def iou_test():
     box_a = np.array([[1.5, 1.5, 2.5, 2.5], [2, 2.5, 3, 3.5], [2.5, 2.5, 3.5, 3.5]])
     box_b = np.array([[2.0, 2, 3, 3], [3.0, 3, 4, 4]])
     print(box_a)
@@ -205,7 +209,7 @@ class Filtrate():
         for i in range(2):
             print(ns[id[i]])
         print("操作后数组:", ns)
-        
+
         # 二维数组
         print("\n=================================\n")
         print("对二维数组使用argsort()进行排序后修改:")
@@ -223,10 +227,10 @@ class Filtrate():
 
         print("---------------------------------")
         print("方法二:直接用argsort:")
-        ns = np.array([[2,4,6],[5,3,1],[0,7,-1]])
+        ns = np.array([[2, 4, 6], [5, 3, 1], [0, 7, -1]])
         print("ns:\n", ns)
 
-        id = ns.argsort(axis= 1)
+        id = ns.argsort(axis=1)
         print("axis= 0:\n", id)
         print("按第二列的数据大小进行排序:\n", ns[id[:, 1]])
 
@@ -242,10 +246,11 @@ class Filtrate():
         # 三维数组
         print("\n=================================\n")
         print("对三维数组使用argsort()进行排序后修改:")
-        ns = np.array([[[2, 4, 6], [5, 3, 1], [0, 7, -1]], [[0*3, 7*3, -1*3],[2*3, 4*3, 6*3], [5*3, 3*3, 1*3]]])
+        ns = np.array([[[2, 4, 6], [5, 3, 1], [0, 7, -1]],
+                       [[0 * 3, 7 * 3, -1 * 3], [2 * 3, 4 * 3, 6 * 3], [5 * 3, 3 * 3, 1 * 3]]])
         print("数据:\n", ns)
         print("方法一:提取出作为判断的某列后用argsort:")
-        judge = ns[:,:,1]
+        judge = ns[:, :, 1]
         print("排序依据数据:\n", judge)
         print("显然这种方法不太合适")
         print("---------------------------------")
@@ -275,31 +280,31 @@ class Filtrate():
 
     def filter_test():
         ns = np.array([[[0, 0, 0, 0, 0, 100],
-                            [1, 1, 1, 1, 1, 10000],
-                            [5, 6, 6, 6, 6, 100],
-                            [3, 3, 3, 3, 3, 100],
-                            [4, 4, 4, 4, 4, 10000],
-                            [2, 2, 2, 2, 2, 100]
-                            ],
-                            [[7, 0, 0, 0, 0, 10000],
-                             [1, 1, 1, 1, 1, 100],
-                             [5, 6, 6, 6, 6, 10000],
-                             [3, 3, 3, 3, 3, 10000],
-                             [0, 4, 4, 4, 4, 100],
-                             [2, 2, 2, 2, 2, 100]
-                             ]
-                            ])
+                        [1, 1, 1, 1, 1, 10000],
+                        [5, 6, 6, 6, 6, 100],
+                        [3, 3, 3, 3, 3, 100],
+                        [4, 4, 4, 4, 4, 10000],
+                        [2, 2, 2, 2, 2, 100]
+                        ],
+                       [[7, 0, 0, 0, 0, 10000],
+                        [1, 1, 1, 1, 1, 100],
+                        [5, 6, 6, 6, 6, 10000],
+                        [3, 3, 3, 3, 3, 10000],
+                        [0, 4, 4, 4, 4, 100],
+                        [2, 2, 2, 2, 2, 100]
+                        ]
+                       ])
         print("原数据:\n", ns)
 
         # 筛选
         # 只计算三维数组的第一个二维数组
         id = np.zeros([ns.shape[1]], dtype=bool)
         for i in range(ns.shape[1]):
-            id = id | (ns[0, :, 5]==100)
+            id = id | (ns[0, :, 5] == 100)
         # print(id)
-        print("筛选后数组:\n", ns[0,id])     # 之后把ns[0,id]看做一个整体;二维数组
+        print("筛选后数组:\n", ns[0, id])  # 之后把ns[0,id]看做一个整体;二维数组
         # 筛选后排序
-        ns_filter = ns[0,id]
+        ns_filter = ns[0, id]
         print("ns_filter为:\n", ns_filter)
 
         id_sort = ns_filter.argsort(axis=0)
@@ -360,10 +365,119 @@ class Filtrate():
         print("操作完后的数据:\n", ns)
 
 
+def text_write():
+    path = os.path.join(os.getcwd(), "txt写入测试")
+    with open(path, 'w') as f:
+        f.write("hello! 这是txt写入测试.")
+
+    ns = np.array(range(12)).reshape(3, 4)
+    with open(path, 'w') as f:
+        f.write("hello! 这是txt写入测试.\n" + ns.__str__())
+        f.write("\nEND")
+
+
+class Occ_filter():
+    # 部分数据,测试足够用
+    cls = np.array([[[7.004445, -2.940634, -2.2007353, -2.5283923],
+                     [9.3398905, -3.9166932, -2.921009, -3.4019845],
+                     [9.33281, -3.9009597, -2.9335585, -3.3912332],
+                     [7.8270535, -2.1166255, -2.4785447, -3.5878234],
+                     [7.465112, -1.6955433, -2.5043492, -3.5932987],
+                     [5.415031, -0.83693886, -2.020754, -2.8435571]]])
+    prob = np.array([[[0.99977916, 0.00004795, 0.0001005, 0.00007242],
+                      [0.99999046, 0.00000175, 0.00000473, 0.00000293],
+                      [0.9999906, 0.00000179, 0.00000471, 0.00000298],
+                      [0.9999074, 0.00004803, 0.00003344, 0.00001103],
+                      [0.9998323, 0.00010508, 0.0000468, 0.00001575],
+                      [0.99723226, 0.00192132, 0.00058813, 0.00025831]]])
+    # bbox_2d = np.array([[[0.07035355, -0.15154037, -0.5888689, 0.56354284],
+    #                      [0.10060313, -0.2533346, -0.83627206, 0.7575691],
+    #                      [0.10399755, -0.230512, -0.7829558, 0.754774],
+    #                      [0.57526064, -0.2599153, 0.5070556, 0.66741943],
+    #                      [0.7744001, -0.19142833, 0.6965968, 0.8053928],
+    #                      [1.0210276, -0.07548057, 0.6491388, 0.7470195]]])
+    bbox_2d = np.array([[[0.0, 0.0, 10.0, 10.0],
+                         [9.0, 0.0, 10.0, 10.0],
+                         [0.0, 25.0, 10.0, 10.0],
+                         [10.0, 0.0, 10.0, 10.0],
+                         [5.0, 25.0, 10.0, 10.0],
+                         [10.0, 25.0, 10.0, 10.0]]])
+    bbox_3d = np.array([[[-0.0502478, 0.05908747, - 0.90959895, 0.23877755, -0.6848674, 0.17785437],
+                         [-0.09393481, 0.08450541, -1.2342116, 0.23911348, -0.89629656, 0.28122324],
+                         [-0.07244383, 0.07180647, - 1.2367451, 0.24810761, -0.8726766, 0.26111692],
+                         [-0.19424656, -0.753002, -0.07067724, 0.00846963, -0.8183509, 0.00125809],
+                         [-0.07138748, -0.75582796, -0.1211952, 0.00485636, -0.84943235, -0.10937988],
+                         [0.17544928, -0.57096535, -0.13709335, 0.0210136, -0.7015238, -0.15523729]]])
+    cls = torch.from_numpy(cls).cuda()
+    bbox_2d = torch.from_numpy(bbox_2d).cuda()
+    bbox_3d = torch.from_numpy(bbox_3d).cuda()
+    print("bbox_3d.grad:", bbox_3d.grad)
+
+
+    def Occlusion(self, cls=None, bbox_2d=None, bbox_3d=None):
+        # print(cls, cls.shape)
+        # print(type(cls))
+        cls = cls.cpu().detach().numpy()
+        bbox_2d = bbox_2d.cpu().detach().numpy()
+        bbox_3d = bbox_3d.cpu().detach().numpy()
+
+        # print(type(cls))
+
+        # print("修改前的bbox_3d:\n", bbox_3d)
+
+        for bs in range(cls.shape[0]):
+            # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+            typeEncode = np.argmax(cls[bs, :, :], axis=1) + 1
+            idx_filter = np.zeros([cls.shape[1]], dtype=bool)
+            for i in range(cls.shape[1]):
+                idx_filter |= typeEncode == 1
+
+            # 由索引过滤出类型为car的数据
+            bbox2d_filter = bbox_2d[bs, idx_filter]
+            bbox3d_filter = bbox_3d[bs, idx_filter]
+            # print("bbox3d_filter修正前:\n", bbox3d_filter)
+            # x,y,w,h --> x1,y1,x2,y2
+            bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+
+            # 筛选后按深度大小排序
+            idx_sort = bbox3d_filter.argsort(axis=0)[:, 2]
+            # print("id_sort:\n", idx_sort)
+
+            # 计算iou,判定遮挡关系,进行遮挡修正
+            for count in range(0, idx_sort.shape[0]-1):
+                # print(count)
+                threshold = 0.2         # 遮挡关系判定的阈值
+                occ_correct = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.0])   # 这里先假定遮挡修正值
+                iouValue = np.zeros(bbox2d_filter.shape[0])     # 初始化全部为0;
+                idx_occlusion = np.zeros(bbox2d_filter.shape[0], dtype=bool)    # 初始化全部为False;
+
+                iouValue[count+1:] = iou(bbox2d_filter[idx_sort[count:count+1]], bbox2d_filter[idx_sort[count+1:]])
+                # print("iouValue:", iouValue)
+                for occid in range(count+1, idx_occlusion.shape[0]):
+                    # print(occid)
+                    idx_occlusion[occid] |= (iouValue[occid] > threshold)
+                # print("遮挡关系:", idx_occlusion)
+                # print("当前值为:", bbox3d_filter[idx_sort[count]])
+                bbox3d_filter[idx_sort[idx_occlusion]] += bbox3d_filter[idx_sort[count]] * occ_correct   # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+                # print("bbox3d_filter修正后:\n", bbox3d_filter)
+
+            bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
+
+            # 将修改完的值返回给原数据
+            bbox_3d[bs, idx_filter] = bbox3d_filter
+
+        # print("修改后的bbox_3d:\n", bbox_3d)
+
+        bbox_3d = torch.from_numpy(bbox_3d).cuda()
+        return bbox_3d
+
+
+
+
 
 
 if __name__ == "__main__":
-    # iou()
+    # iou_test()
     # size()
     # anchors()
     # pkl_read()
@@ -373,4 +487,9 @@ if __name__ == "__main__":
 
     # Filtrate.modify_test(Filtrate.testset)
     # Filtrate.filter_test()
-    Filtrate.test()
+    # Filtrate.test()
+
+    # text_write()
+
+    Occ_filter().Occlusion(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d)
+    # print("最后的bbox_3d:\n", bbox_3d)
