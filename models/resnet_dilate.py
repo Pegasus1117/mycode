@@ -23,6 +23,123 @@ def dynamic_local_filtering(x, depth, dilated=1):
                 filter += (pad_depth[:, :, dilated + i: dilated + i + h, dilated + j: dilated + j + w] * pad_x[:, :, dilated + i: dilated + i + h, dilated + j: dilated + j + w]).clone()
     return filter / 9
 
+# 遮挡模块:
+# def Occlusion(cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
+#     # print(cls, cls.shape)
+#     # print(type(cls))
+#     cls = cls.cpu().detach().numpy()
+#     bbox_2d = bbox_2d.cpu().detach().numpy()
+#     bbox_3d = bbox_3d.cpu().detach().numpy()
+#     occ_correct = occ_correct.cpu().detach().numpy()
+#     # print(type(cls))
+#     # print("修改前的bbox_3d:\n", bbox_3d)
+#
+#     for bs in range(cls.shape[0]):
+#         # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+#         typeEncode = np.argmax(cls[bs, :, :], axis=1) + 1
+#         idx_filter = np.zeros([cls.shape[1]], dtype=bool)
+#         for i in range(cls.shape[1]):
+#             idx_filter |= typeEncode == 1
+#
+#         # 由索引过滤出类型为car的数据
+#         bbox2d_filter = bbox_2d[bs, idx_filter]
+#         bbox3d_filter = bbox_3d[bs, idx_filter]
+#         # print("bbox3d_filter修正前:\n", bbox3d_filter)
+#         # x,y,w,h --> x1,y1,x2,y2
+#         bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+#
+#         # 筛选后按深度大小排序
+#         idx_sort = bbox3d_filter.argsort(axis=0)[:, 2]
+#         # print("id_sort:\n", idx_sort)
+#
+#         # 计算iou,判定遮挡关系,进行遮挡修正
+#         for count in range(0, idx_sort.shape[0]-1):
+#             # print(count)
+#             # threshold = 0.2         # 遮挡关系判定的阈值
+#             # occ_correct = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.0])   # 这里先假定遮挡修正值
+#             iouValue = np.zeros(bbox2d_filter.shape[0])     # 初始化全部为0;
+#             idx_occlusion = np.zeros(bbox2d_filter.shape[0], dtype=bool)    # 初始化全部为False;
+#
+#             iouValue[count+1:] = iou(bbox2d_filter[idx_sort[count:count+1]], bbox2d_filter[idx_sort[count+1:]])
+#             # print("iouValue:", iouValue)
+#             for occid in range(count+1, idx_occlusion.shape[0]):
+#                 # print(occid)
+#                 idx_occlusion[occid] |= (iouValue[occid] > threshold)
+#             # print("遮挡关系:", idx_occlusion)
+#             # print("当前值为:", bbox3d_filter[idx_sort[count]])
+#             bbox3d_filter[idx_sort[idx_occlusion]] += bbox3d_filter[idx_sort[count]] * occ_correct   # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+#             # print("bbox3d_filter修正后:\n", bbox3d_filter)
+#
+#         bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
+#
+#         # 将修改完的值返回给原数据
+#         bbox_3d[bs, idx_filter] = bbox3d_filter
+#
+#     # print("修改后的bbox_3d:\n", bbox_3d)
+#
+#     bbox_3d = torch.from_numpy(bbox_3d).cuda()
+#     return bbox_3d
+
+# 遮挡模块:
+def Occlusion(cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
+    # print("修改前的bbox_3d:\n", bbox_3d)
+    # bbox_3d_correct = torch.zeros_like(bbox_3d)
+    # bbox_3d_correct = torch.tensor(bbox_3d_correct, requires_grad=False)
+    # occ_correct = occ_correct.detach()
+
+    for bs in range(cls.shape[0]):
+        # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+        typeEncode = torch.argmax(cls[bs, :, :], 1) + 1
+        # print("typeEncode:", typeEncode)
+        idx_filter = torch.where(typeEncode == 1, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+        idx_filter = idx_filter.bool()
+        # print("idx_filter:", idx_filter)
+
+        # 由索引过滤出类型为car的数据
+        bbox2d_filter = bbox_2d[bs, idx_filter]
+        # bbox2d_filter = torch.tensor(bbox2d_filter, requires_grad=False)
+        bbox3d_filter = bbox_3d[bs, idx_filter]
+        bbox3d_filter = bbox3d_filter.detach()
+        # bbox3d_filter_tmp = bbox3d_filter.clone()
+        # print("bbox3d_filter修正前:\n", bbox3d_filter)
+        # x,y,w,h --> x1,y1,x2,y2
+        bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+        # print("bbox2d_filter的type: {}".format(type(bbox2d_filter)))
+
+        # 筛选后按深度大小排序
+        idx_sort = bbox3d_filter.argsort(0)[:, 2]
+        # print("id_sort:\n", idx_sort)
+
+        # 计算iou,判定遮挡关系,进行遮挡修正
+        time_start = time()
+        for count in range(0, idx_sort.shape[0] - 1):
+            # print("第 {} 次循环:".format(count))
+            iouValue = torch.zeros(bbox2d_filter.shape[0]).cuda()  # 初始化全部为0;
+
+            iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]], bbox2d_filter[idx_sort[count + 1:]])
+            # print("iouValue:", iouValue)
+            idx_occlusion = torch.where(iouValue > threshold, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+            # print("遮挡关系:", idx_occlusion)
+            # print("当前值为:", bbox3d_filter[idx_sort[count]])
+            # print("occ_correct:", occ_correct)
+            print("bbox3d_filter.grad_fn:", bbox3d_filter.grad_fn)
+            correct_value = bbox3d_filter[idx_sort[count]].detach() * occ_correct
+            # print("correct_value:", correct_value)
+            bbox3d_filter[idx_sort[idx_occlusion]] =bbox3d_filter[idx_sort[idx_occlusion]] + correct_value   # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+            # print("bbox3d_filter[idx_sort[idx_occlusion]]:", bbox3d_filter[idx_sort[idx_occlusion]])
+            # print("bbox3d_filter修正后:\n", bbox3d_filter)
+
+        bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
+        print("用了{}秒".format(time()-time_start))
+        # 将修改完的值返回给原数据
+        # bbox_3d_correct[bs, idx_filter] = bbox3d_filter - bbox3d_filter_tmp
+        bbox_3d[bs, idx_filter] = bbox3d_filter
+
+    # bbox_3d = bbox_3d + bbox_3d_correct
+
+    # print("修改后的bbox_3d:\n", bbox_3d)
+    return bbox_3d
+
 class RPN(nn.Module):
 
 
@@ -37,6 +154,10 @@ class RPN(nn.Module):
         self.use_corner = conf.use_corner                   # False
         self.corner_in_3d = conf.corner_in_3d               # False
         self.deformable = conf.deformable                   # False
+
+        # 遮挡模块:
+        self.occlusion = conf.occlusion
+        self.threshold = conf.threshold
 
         if conf.use_rcnn_pretrain:  # False
             # print(self.base.state_dict().keys())
@@ -116,6 +237,13 @@ class RPN(nn.Module):
         self.bbox_h3d = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
         self.bbox_l3d = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
         self.bbox_rY3d = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
+
+        # 遮挡模块:
+        if self.occlusion:
+            self.occ_module = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
+            self.avg_pool = nn.AdaptiveMaxPool2d((1, 1))
+            self.fc1 = nn.Linear(self.occ_module.out_channels, 133)
+            self.fc2 = nn.Linear(133, 7)
 
         if self.corner_in_3d:   # False
             self.bbox_3d_corners = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors * 18, 1)  # 2 * 8 + 2
@@ -243,6 +371,7 @@ class RPN(nn.Module):
         # bundle    打包
         bbox_2d = torch.cat((bbox_x, bbox_y, bbox_w, bbox_h), dim=2)    # [N,36*H*W,4]
         bbox_3d = torch.cat((bbox_x3d, bbox_y3d, bbox_z3d, bbox_w3d, bbox_h3d, bbox_l3d, bbox_rY3d), dim=2) # [N,36*H*W,7]
+        print("bbox_3d.shape: ", bbox_3d.shape)
 
         if self.corner_in_3d:
             corners_3d = self.bbox_3d_corners(prop_feats)
@@ -257,6 +386,20 @@ class RPN(nn.Module):
 
         cls = flatten_tensor(cls)    # [N,4,36*H,W]->[N,36*H*W,4]   #TOdo: 尺寸问题？？
         prob = flatten_tensor(prob)  # [N,4,36*H,W]->[N,36*H*W,4]
+
+        # 遮挡模块:
+        if self.occlusion:
+            occ = self.occ_module(prop_feats)
+            # occ = torch.flatten(occ.view(batch_size, 1, feat_h * self.num_anchors*feat_w, 7), 1, 2)
+            print("原始的occ.shape：\n", occ.shape)
+            occ = self.avg_pool(occ)
+            occ = occ.view(occ.size(0), -1)
+            occ_correct = self.fc1(occ)
+            occ_correct = self.fc2(occ_correct)
+            print("occ_correct: ", occ_correct)
+            print("occ_correct.shape: ", occ_correct.shape)
+            # occ_correct =
+            bbox_3d = Occlusion(cls, bbox_2d, bbox_3d, self.threshold, occ_correct)
 
         if self.training:
             #print(cls.size(), prob.size(), bbox_2d.size(), bbox_3d.size(), feat_size)

@@ -20,6 +20,10 @@ from lib.core import *
 from lib.imdb_util import *
 from lib.loss.rpn_3d import *
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
+torch.autograd.set_detect_anomaly(True)
 
 def main(argv):
 
@@ -123,7 +127,7 @@ def main(argv):
         # next iteration
         iterator, images, depths, imobjs = next_iteration(dataset.loader, iterator)
 
-        # print(images, images.size())
+        print("======images.size:", images.size())
         #  learning rate
         adjust_lr(conf, optimizer, iteration, scheduler)
 

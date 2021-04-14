@@ -12,7 +12,7 @@ def Config():
 
     conf.model = 'resnet_dilate'
     conf.lr = 0.01            # 学习率
-    conf.max_iter = 60000     # 最大迭代数
+    conf.max_iter = 40000     # 最大迭代数
     conf.use_dropout = True
     conf.drop_channel = True
     conf.dropout_rate = 0.5
@@ -38,6 +38,12 @@ def Config():
                                 conf.lr_policy, 'iter' + str(conf.max_iter),
                                 datetime.datetime.now().strftime("%Y.%m.%d-%H:%M:%S")]).replace('.', '_').replace(':', '_').replace('-', '_')
 
+    # pretrained 自己加的
+    # conf.pretrained = 'pretrain/model_40000_pkl'
+
+    # 遮挡模块
+    conf.occlusion = True
+    conf.threshold = 0.9
 
     # solver settings
     conf.solver_type = 'sgd'     # 随机梯度下降

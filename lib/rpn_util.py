@@ -1381,6 +1381,25 @@ def im_detect_3d(im, depth, net, rpn_conf, preprocess, p2, gpu=0, synced=False):
     # else:
     cls, prob, bbox_2d, bbox_3d, feat_size, rois = net(im, depth)
 
+    '''
+    # 用于获取部分结果
+    txtpath = os.path.join(os.getcwd(), "单训练结果的记录")
+    c = cls.cpu().detach().numpy()
+    p = prob.cpu().detach().numpy()
+    b2 = bbox_2d.cpu().detach().numpy()
+    b3 = bbox_3d.cpu().detach().numpy()
+    fs = np.asarray(feat_size)
+    with open(txtpath, 'w') as f :
+        f.write("单训练结果的记录\n")
+        f.write("bbox_3d.grad:{}".format(bbox_3d.grad))
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("cls", c.shape, c.__str__()))
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("prob", p.shape, p.__str__()))
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("bbox_2d", b2.shape, b2.__str__()))
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("bbox_3d", b3.shape, b3.__str__()))
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("feat_size", fs.shape, fs.__str__()))
+        f.write("\nEND")
+    '''
+
     # compute feature resolution
     num_anchors = rpn_conf.anchors.shape[0]
 

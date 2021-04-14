@@ -408,21 +408,30 @@ class Occ_filter():
                          [-0.19424656, -0.753002, -0.07067724, 0.00846963, -0.8183509, 0.00125809],
                          [-0.07138748, -0.75582796, -0.1211952, 0.00485636, -0.84943235, -0.10937988],
                          [0.17544928, -0.57096535, -0.13709335, 0.0210136, -0.7015238, -0.15523729]]])
+    threshold = 0.2  # 遮挡关系判定的阈值
+    occ_correct = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.0])  # 这里先假定遮挡修正值
     cls = torch.from_numpy(cls).cuda()
     bbox_2d = torch.from_numpy(bbox_2d).cuda()
     bbox_3d = torch.from_numpy(bbox_3d).cuda()
+    occ_correct = torch.from_numpy(occ_correct).cuda()
     print("bbox_3d.grad:", bbox_3d.grad)
+    print("occ_correct.shape:", occ_correct.shape)
+    print("occ_correct:", occ_correct)
+
+    print("cls.shape:", cls.shape)
+    print("torch.unsqueeze(cls).shap:", torch.unsqueeze(cls, 2).shape)
 
 
-    def Occlusion(self, cls=None, bbox_2d=None, bbox_3d=None):
+    # print(cls.shape[0])
+
+    def Occlusion_v1(self, cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
         # print(cls, cls.shape)
         # print(type(cls))
         cls = cls.cpu().detach().numpy()
         bbox_2d = bbox_2d.cpu().detach().numpy()
         bbox_3d = bbox_3d.cpu().detach().numpy()
-
+        occ_correct = occ_correct.cpu().detach().numpy()
         # print(type(cls))
-
         # print("修改前的bbox_3d:\n", bbox_3d)
 
         for bs in range(cls.shape[0]):
@@ -441,24 +450,26 @@ class Occ_filter():
 
             # 筛选后按深度大小排序
             idx_sort = bbox3d_filter.argsort(axis=0)[:, 2]
-            # print("id_sort:\n", idx_sort)
+            print("id_sort:\n", idx_sort)
 
             # 计算iou,判定遮挡关系,进行遮挡修正
-            for count in range(0, idx_sort.shape[0]-1):
+            for count in range(0, idx_sort.shape[0] - 1):
                 # print(count)
-                threshold = 0.2         # 遮挡关系判定的阈值
-                occ_correct = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.0])   # 这里先假定遮挡修正值
-                iouValue = np.zeros(bbox2d_filter.shape[0])     # 初始化全部为0;
-                idx_occlusion = np.zeros(bbox2d_filter.shape[0], dtype=bool)    # 初始化全部为False;
+                # threshold = 0.2         # 遮挡关系判定的阈值
+                # occ_correct = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.0])   # 这里先假定遮挡修正值
+                iouValue = np.zeros(bbox2d_filter.shape[0])  # 初始化全部为0;
+                idx_occlusion = np.zeros(bbox2d_filter.shape[0], dtype=bool)  # 初始化全部为False;
 
-                iouValue[count+1:] = iou(bbox2d_filter[idx_sort[count:count+1]], bbox2d_filter[idx_sort[count+1:]])
+                iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]],
+                                           bbox2d_filter[idx_sort[count + 1:]])
                 # print("iouValue:", iouValue)
-                for occid in range(count+1, idx_occlusion.shape[0]):
+                for occid in range(count + 1, idx_occlusion.shape[0]):
                     # print(occid)
                     idx_occlusion[occid] |= (iouValue[occid] > threshold)
                 # print("遮挡关系:", idx_occlusion)
                 # print("当前值为:", bbox3d_filter[idx_sort[count]])
-                bbox3d_filter[idx_sort[idx_occlusion]] += bbox3d_filter[idx_sort[count]] * occ_correct   # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+                bbox3d_filter[idx_sort[idx_occlusion]] += bbox3d_filter[idx_sort[
+                    count]] * occ_correct  # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
                 # print("bbox3d_filter修正后:\n", bbox3d_filter)
 
             bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
@@ -470,11 +481,129 @@ class Occ_filter():
 
         bbox_3d = torch.from_numpy(bbox_3d).cuda()
         return bbox_3d
+    '''v1版本中将数据都转化为ndarray进行计算,由于计算量较大且只用到cpu,导致计算时间过长;v2版本旨在解决此问题;
+       v2版本不再将源数据转为ndarray进行计算,全部使用torch.Tenser进行计算,并根据Tenser的特点改变了部分代码实现.
+       参考了:'''
+    def Occlusion_v2(self, cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
+        # print(cls, cls.shape)
+        # print(type(cls))
+        # print(type(cls))
+        print("修改前的bbox_3d:\n", bbox_3d)
 
+        for bs in range(cls.shape[0]):
+            # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+            typeEncode = torch.argmax(cls[bs, :, :], 1) + 1
+            # print("typeEncode:", typeEncode)
+            # idx_zeros = torch.zeros(cls.shape[1]).cuda().byte()
+            # idx_ones = torch.ones(cls.shape[1]).cuda().byte()
+            # print("idx_ones", idx_ones)
+            idx_filter = torch.where(typeEncode == 1, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+            print("idx_filter:", idx_filter)
 
+            # 由索引过滤出类型为car的数据
+            bbox2d_filter = bbox_2d[bs, idx_filter]
+            bbox3d_filter = bbox_3d[bs, idx_filter]
+            # print("bbox3d_filter修正前:\n", bbox3d_filter)
+            # x,y,w,h --> x1,y1,x2,y2
+            bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+            # print("bbox2d_filter的type: {}".format(type(bbox2d_filter)))
 
+            # 筛选后按深度大小排序
+            idx_sort = bbox3d_filter.argsort(0)[:, 2]
+            # print("id_sort:\n", idx_sort)
 
+            # 计算iou,判定遮挡关系,进行遮挡修正
+            for count in range(0, idx_sort.shape[0] - 1):
+                print("第 {} 次循环:".format(count))
+                # threshold = 0.2         # 遮挡关系判定的阈值
+                # occ_correct = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.0])   # 这里先假定遮挡修正值
+                iouValue = torch.zeros(bbox2d_filter.shape[0]).cuda()  # 初始化全部为0;
+                # idx_occlusion = torch.zeros(bbox2d_filter.shape[0]).cuda().byte()  # 初始化全部为False;
 
+                # iouValue[count + 1:] = torch.from_numpy(iou(bbox2d_filter[idx_sort[count:count + 1]].cpu().detach().numpy(),
+                #                            bbox2d_filter[idx_sort[count + 1:]].cpu().detach().numpy()))
+                iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]], bbox2d_filter[idx_sort[count + 1:]])
+                print("iouValue:", iouValue)
+                idx_occlusion = torch.where(iouValue > threshold, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+                # for occid in range(count + 1, idx_occlusion.shape[0]):
+                #     # print(occid)
+                #     idx_occlusion[occid] |= (iouValue[occid] > threshold)
+                print("遮挡关系:", idx_occlusion)
+                print("当前值为:", bbox3d_filter[idx_sort[count]])
+                bbox3d_filter[idx_sort[idx_occlusion]] += bbox3d_filter[idx_sort[
+                    count]] * occ_correct  # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+                # print("bbox3d_filter修正后:\n", bbox3d_filter)
+
+            bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
+
+            # 将修改完的值返回给原数据
+            bbox_3d[bs, idx_filter] = bbox3d_filter
+
+        print("修改后的bbox_3d:\n", bbox_3d)
+
+        return bbox_3d
+    '''v2版本中出现梯度问题，原因在于直接在原数据上进行索引、分割、修改，导致在后向传播中产生梯度问题；v3版本旨在解决此问题;
+       v3版本计划采用两个方法来解决：detach()方法、不再在原数据上直接修改而是采用增量相加；
+       参考了：rpn_3d.py中数据复制和新增数据的处理方式'''
+    def Occlusion_v3(self, cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
+        # print(cls, cls.shape)
+        # print(type(cls))
+        # print(type(cls))
+        print("修改前的bbox_3d:\n", bbox_3d)
+
+        bbox_3d_correct = torch.zeros_like(bbox_3d)
+        bbox_3d_correct = torch.tensor(bbox_3d_correct, requires_grad=False)
+
+        for bs in range(cls.shape[0]):
+            # ======cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+            typeEncode = torch.argmax(cls[bs, :, :], 1) + 1
+            # print("typeEncode:", typeEncode)
+            idx_filter = torch.where(typeEncode == 1, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+            print("idx_filter:", idx_filter)
+
+            # ======由索引过滤出类型为car的数据
+            bbox2d_filter = bbox_2d[bs, idx_filter]
+            bbox2d_filter = torch.tensor(bbox2d_filter, requires_grad=False)  # .type(torch.FloatTensor).cuda()
+            bbox3d_filter = bbox_3d[bs, idx_filter]
+            print("bbox3d_filter.grad:", bbox3d_filter.grad)
+            bbox3d_filter = torch.tensor(bbox3d_filter, requires_grad=False)  # .type(torch.FloatTensor).cuda()
+            print("bbox3d_filter.grad:", bbox3d_filter.grad)
+            bbox3d_filter_tmp = bbox3d_filter.clone()
+            # print("bbox3d_filter修正前:\n", bbox3d_filter)
+            # x,y,w,h --> x1,y1,x2,y2
+            bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+            # print("bbox2d_filter的type: {}".format(type(bbox2d_filter)))
+
+            # ======筛选后按深度大小排序
+            idx_sort = bbox3d_filter.argsort(0)[:, 2]
+            # print("id_sort:\n", idx_sort)
+
+            # ======计算iou,判定遮挡关系,进行遮挡修正
+            for count in range(0, idx_sort.shape[0] - 1):
+                print("第 {} 次循环:".format(count))
+
+                iouValue = torch.zeros(bbox2d_filter.shape[0]).cuda()  # 初始化全部为0;
+
+                iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]], bbox2d_filter[idx_sort[count + 1:]])
+                print("iouValue:", iouValue)
+
+                idx_occlusion = torch.where(iouValue > threshold, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+                print("遮挡关系:", idx_occlusion)
+                print("当前值为:", bbox3d_filter[idx_sort[count]])
+
+                # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+                bbox3d_filter[idx_sort[idx_occlusion]] = bbox3d_filter[idx_sort[idx_occlusion]] + bbox3d_filter[idx_sort[count]] * occ_correct
+                # print("bbox3d_filter修正后:\n", bbox3d_filter)
+
+            bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步可能不太需要,因为从始至终都没改变bbox_2d的值;
+
+            bbox_3d_correct[bs, idx_filter] = bbox3d_filter - bbox3d_filter_tmp
+        print("bbox_3d_correct:", bbox_3d_correct)
+        # ======将修改完的值返回给原数据
+        bbox_3d = bbox_3d + bbox_3d_correct
+        print("修改后的bbox_3d:\n", bbox_3d)
+
+        return bbox_3d
 
 if __name__ == "__main__":
     # iou_test()
@@ -491,5 +620,8 @@ if __name__ == "__main__":
 
     # text_write()
 
-    Occ_filter().Occlusion(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d)
+    # Occ_filter().Occlusion_v1(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold, Occ_filter.occ_correct)
     # print("最后的bbox_3d:\n", bbox_3d)
+    # Occ_filter().Occlusion_v2(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold, Occ_filter.occ_correct)
+    # print("最后的bbox_3d:\n", bbox_3d)
+    Occ_filter().Occlusion_v3(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold,Occ_filter.occ_correct)
