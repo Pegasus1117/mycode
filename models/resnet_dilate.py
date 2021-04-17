@@ -80,6 +80,7 @@ def dynamic_local_filtering(x, depth, dilated=1):
 #     bbox_3d = torch.from_numpy(bbox_3d).cuda()
 #     return bbox_3d
 
+'''
 # 遮挡模块:
 def Occlusion(cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
     # print("修改前的bbox_3d:\n", bbox_3d)
@@ -139,6 +140,7 @@ def Occlusion(cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=N
 
     # print("修改后的bbox_3d:\n", bbox_3d)
     return bbox_3d
+'''
 
 class RPN(nn.Module):
 
@@ -156,8 +158,8 @@ class RPN(nn.Module):
         self.deformable = conf.deformable                   # False
 
         # 遮挡模块:
-        self.occlusion = conf.occlusion
-        self.threshold = conf.threshold
+        self.occlusion = conf.occlusion if "occlusion" in conf else False
+        self.threshold = conf.threshold if "threshold" in conf else 1
 
         if conf.use_rcnn_pretrain:  # False
             # print(self.base.state_dict().keys())
@@ -240,9 +242,9 @@ class RPN(nn.Module):
 
         # 遮挡模块:
         if self.occlusion:
-            self.occ_module = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
+            self.occ_correct = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
             self.avg_pool = nn.AdaptiveMaxPool2d((1, 1))
-            self.fc1 = nn.Linear(self.occ_module.out_channels, 133)
+            self.fc1 = nn.Linear(self.occ_correct.out_channels, 133)
             self.fc2 = nn.Linear(133, 7)
 
         if self.corner_in_3d:   # False
@@ -371,7 +373,7 @@ class RPN(nn.Module):
         # bundle    打包
         bbox_2d = torch.cat((bbox_x, bbox_y, bbox_w, bbox_h), dim=2)    # [N,36*H*W,4]
         bbox_3d = torch.cat((bbox_x3d, bbox_y3d, bbox_z3d, bbox_w3d, bbox_h3d, bbox_l3d, bbox_rY3d), dim=2) # [N,36*H*W,7]
-        print("bbox_3d.shape: ", bbox_3d.shape)
+        # print("bbox_3d.shape: ", bbox_3d.shape)
 
         if self.corner_in_3d:
             corners_3d = self.bbox_3d_corners(prop_feats)
@@ -389,17 +391,17 @@ class RPN(nn.Module):
 
         # 遮挡模块:
         if self.occlusion:
-            occ = self.occ_module(prop_feats)
+            occ_correct = self.occ_correct(prop_feats)
             # occ = torch.flatten(occ.view(batch_size, 1, feat_h * self.num_anchors*feat_w, 7), 1, 2)
-            print("原始的occ.shape：\n", occ.shape)
-            occ = self.avg_pool(occ)
-            occ = occ.view(occ.size(0), -1)
-            occ_correct = self.fc1(occ)
+            # print("原始的occ.shape：\n", occ.shape)
+            occ_correct = self.avg_pool(occ_correct)
+            occ_correct = occ_correct.view(occ_correct.size(0), -1)
+            occ_correct = self.fc1(occ_correct)
             occ_correct = self.fc2(occ_correct)
-            print("occ_correct: ", occ_correct)
-            print("occ_correct.shape: ", occ_correct.shape)
-            # occ_correct =
-            bbox_3d = Occlusion(cls, bbox_2d, bbox_3d, self.threshold, occ_correct)
+            # occ_correct = occ_correct.view(-1)
+            # print("occ_correct: ", occ_correct)
+            # print("occ_correct.shape: ", occ_correct.shape)
+            # bbox_3d = Occlusion(cls, bbox_2d, bbox_3d, self.threshold, occ_correct)
 
         if self.training:
             #print(cls.size(), prob.size(), bbox_2d.size(), bbox_3d.size(), feat_size)
@@ -408,6 +410,8 @@ class RPN(nn.Module):
             elif self.use_corner:
                 return cls, prob, bbox_2d, bbox_3d, torch.from_numpy(np.array(feat_size)).cuda(), bbox_vertices
             else:
+                if self.occlusion:
+                    return cls, prob, bbox_2d, bbox_3d, torch.from_numpy(np.array(feat_size)).cuda(), occ_correct
                 return cls, prob, bbox_2d, bbox_3d, torch.from_numpy(np.array(feat_size)).cuda()
 
         else:
@@ -416,7 +420,8 @@ class RPN(nn.Module):
                 self.feat_size = [feat_h, feat_w]
                 self.rois = locate_anchors(self.anchors, self.feat_size, self.feat_stride, convert_tensor=True)
                 self.rois = self.rois.type(torch.cuda.FloatTensor)
-
+            if self.occlusion:
+                return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois, occ_correct
             return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois
 
 
@@ -425,7 +430,7 @@ def build(conf, phase='train'):
     train = phase.lower() == 'train'
 
     rpn_net = RPN(phase, conf)
-    print(rpn_net)
+    # print(rpn_net)
     if train: rpn_net.train()   #
     else: rpn_net.eval()
 

@@ -605,6 +605,76 @@ class Occ_filter():
 
         return bbox_3d
 
+    # 遮挡模块:
+    def Occlusion_v4(self, cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
+        '''
+        cls: tensor.cuda, (bathsize, N, 4),
+        bbox_2d: tensor.cuda, (bathsize, N, 4),
+        bbox_3d: tensor.cuda, (bathsize, N, 7),
+        occ_correct: tensor.cuda, (7),
+        threshold: float in 0~1,
+        '''
+        # print("修改前的bbox_3d:\n", bbox_3d)
+        # bbox_3d_correct = torch.zeros_like(bbox_3d)
+        # bbox_3d_correct = torch.tensor(bbox_3d_correct, requires_grad=False)
+        # occ_correct = occ_correct.detach()
+
+
+        # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+        typeEncode = torch.argmax(cls[:, :], 1) + 1
+        # print("typeEncode:", typeEncode)
+        idx_filter = torch.where(typeEncode == 1, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
+        idx_filter = idx_filter.bool()
+        # print("idx_filter:", idx_filter)
+
+        # 由索引过滤出类型为car的数据
+        bbox2d_filter = bbox_2d[idx_filter]
+        # bbox2d_filter = torch.tensor(bbox2d_filter, requires_grad=False)
+        bbox3d_filter = bbox_3d[idx_filter]
+        bbox3d_filter = bbox3d_filter.detach()
+        # bbox3d_filter_tmp = bbox3d_filter.clone()
+        # print("bbox3d_filter修正前:\n", bbox3d_filter)
+        # x,y,w,h --> x1,y1,x2,y2
+        bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+        # print("bbox2d_filter的type: {}".format(type(bbox2d_filter)))
+
+        # 筛选后按深度大小排序
+        idx_sort = bbox3d_filter.argsort(0)[:, 2]
+        # print("id_sort:\n", idx_sort)
+
+        # 计算iou,判定遮挡关系,进行遮挡修正
+        time_start = time()
+        for count in range(0, idx_sort.shape[0] - 1):
+            # print("第 {} 次循环:".format(count))
+            iouValue = torch.zeros(bbox2d_filter.shape[0]).cuda()  # 初始化全部为0;
+
+            iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]],
+                                       bbox2d_filter[idx_sort[count + 1:]])
+            # print("iouValue:", iouValue)
+            idx_occlusion = torch.where(iouValue > threshold, torch.ones(1).cuda().byte(),
+                                        torch.zeros(1).cuda().byte())
+            # print("遮挡关系:", idx_occlusion)
+            # print("当前值为:", bbox3d_filter[idx_sort[count]])
+            # print("occ_correct:", occ_correct)
+            # print("bbox3d_filter.grad_fn:", bbox3d_filter.grad_fn)
+            correct_value = bbox3d_filter[idx_sort[count]].detach() * occ_correct
+            # print("correct_value:", correct_value)
+            bbox3d_filter[idx_sort[idx_occlusion]] = bbox3d_filter[idx_sort[
+                idx_occlusion]] + correct_value  # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+            # print("bbox3d_filter[idx_sort[idx_occlusion]]:", bbox3d_filter[idx_sort[idx_occlusion]])
+            # print("bbox3d_filter修正后:\n", bbox3d_filter)
+
+        bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
+        print("用了{}秒".format(time() - time_start))
+        # 将修改完的值返回给原数据
+        # bbox_3d_correct[bs, idx_filter] = bbox3d_filter - bbox3d_filter_tmp
+        bbox_3d[idx_filter] = bbox3d_filter
+
+        # bbox_3d = bbox_3d + bbox_3d_correct
+
+        # print("修改后的bbox_3d:\n", bbox_3d)
+        return bbox_3d
+
 if __name__ == "__main__":
     # iou_test()
     # size()
@@ -622,6 +692,8 @@ if __name__ == "__main__":
 
     # Occ_filter().Occlusion_v1(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold, Occ_filter.occ_correct)
     # print("最后的bbox_3d:\n", bbox_3d)
-    # Occ_filter().Occlusion_v2(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold, Occ_filter.occ_correct)
+    Occ_filter().Occlusion_v2(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold, Occ_filter.occ_correct)
     # print("最后的bbox_3d:\n", bbox_3d)
-    Occ_filter().Occlusion_v3(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold,Occ_filter.occ_correct)
+    # Occ_filter().Occlusion_v3(Occ_filter.cls, Occ_filter.bbox_2d, Occ_filter.bbox_3d, Occ_filter.threshold,Occ_filter.occ_correct)
+    ps = torch.tensor([])
+    print("ps: {}, ps.shape: {} ".format(ps, ps.shape[0]))

@@ -1354,7 +1354,7 @@ def calc_output_size(res, stride):
 
     return np.ceil(np.array(res)/stride).astype(int)    # np.ceilf()向上取整
 
-
+# KeyFunction 测试
 def im_detect_3d(im, depth, net, rpn_conf, preprocess, p2, gpu=0, synced=False):
     """
     Object detection in 3D
@@ -1380,7 +1380,25 @@ def im_detect_3d(im, depth, net, rpn_conf, preprocess, p2, gpu=0, synced=False):
     #     cls, prob, bbox_2d, bbox_3d, feat_size, rois, bbox_vertices = net(im, depth)
     # else:
     cls, prob, bbox_2d, bbox_3d, feat_size, rois = net(im, depth)
-
+    '''
+    txtpath = os.path.join(os.getcwd(), "单训练结果的记录")
+    with open(txtpath, 'w') as f :
+        f.write("单训练结果的记录\n")
+        f.write("bbox_3d.grad:{}".format(bbox_3d.grad))
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("cls", cls.shape, cls.__str__()))
+        #   cls的shape:torch.Size([1, 122112, 4]);     grad_fn=<ViewBackward>;
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("prob", prob.shape, prob.__str__()))
+        #   prob的shape:torch.Size([1, 122112, 4]);    grad_fn=<ViewBackward>
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("bbox_2d", bbox_2d.shape, bbox_2d.__str__()))
+        #   bbox_2d的shape:torch.Size([1, 122112, 4]); grad_fn=<CatBackward>
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("bbox_3d", bbox_3d.shape, bbox_3d.__str__()))
+        #   bbox_3d的shape:torch.Size([1, 122112, 7]); grad_fn=<CatBackward>
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("feat_size", len(feat_size), feat_size.__str__()))
+        #   feat_size的shape:2;内容为:[32, 106]
+        f.write("\n{}的shape:{};内容为:\n{}\n".format("rois", rois.shape, rois.__str__()))
+        #   rois的shape: torch.Size([122112, 5]);  [x1, y1, x2, y2, anchor_index]
+        f.write("\nEND")
+    '''
     '''
     # 用于获取部分结果
     txtpath = os.path.join(os.getcwd(), "单训练结果的记录")

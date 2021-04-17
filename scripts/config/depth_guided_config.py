@@ -43,7 +43,7 @@ def Config():
 
     # 遮挡模块
     conf.occlusion = True
-    conf.threshold = 0.9
+    conf.threshold = 0.3
 
     # solver settings
     conf.solver_type = 'sgd'     # 随机梯度下降

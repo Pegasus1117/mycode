@@ -127,7 +127,7 @@ def main(argv):
         # next iteration
         iterator, images, depths, imobjs = next_iteration(dataset.loader, iterator)
 
-        print("======images.size:", images.size())
+        # print("======images.size:", images.size())
         #  learning rate
         adjust_lr(conf, optimizer, iteration, scheduler)
 
@@ -136,6 +136,8 @@ def main(argv):
             cls, prob, bbox_2d, bbox_3d, feat_size, bbox_vertices, corners_3d = rpn_net(images.cuda(), depths.cuda())
         elif conf.use_corner:
             cls, prob, bbox_2d, bbox_3d, feat_size, bbox_vertices = rpn_net(images.cuda(), depths.cuda())
+        elif conf.occlusion:
+            cls, prob, bbox_2d, bbox_3d, feat_size, occ_correct = rpn_net(images.cuda(), depths.cuda())
         else:
             cls, prob, bbox_2d, bbox_3d, feat_size = rpn_net(images.cuda(), depths.cuda())
         # print('cls:{}, {}\n prob:{}, {}\n bbox_2d:{}, {}\n bbox_3d:{}, {}\n'.format(cls, cls.size(), prob, prob.size(), bbox_2d, bbox_2d.size(), bbox_3d, bbox_3d.size()))
@@ -146,6 +148,10 @@ def main(argv):
             det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, bbox_vertices, corners_3d)
         elif conf.use_corner:
             det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, bbox_vertices)
+        elif conf.occlusion:
+            # print("occ_correct:", occ_correct)
+            # print("occ_correct.shape:", occ_correct.shape)
+            det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, occ_correct=occ_correct)
         else:
             det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size)
 
