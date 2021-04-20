@@ -222,6 +222,12 @@ def intersect(box_a, box_b, mode='combinations', data_type=None):
             # 3.1 用两个对角点坐标计算相交区域的长和宽；
             inter = np.clip((max_xy - min_xy), a_min=0, a_max=None)
 
+        # torch.Tesnor
+        elif data_type == torch.Tensor:
+            max_xy = torch.min(box_a[:, 2:], torch.unsqueeze(box_b[:, 2:], dim=1))
+            min_xy = torch.max(box_a[:, :2], torch.unsqueeze(box_b[:, :2], dim=1))
+            inter = torch.clamp((max_xy - min_xy), 0)
+
         # unknown type
         else:
             raise ValueError('type {} is not implemented'.format(data_type))
@@ -309,14 +315,16 @@ def iou(box_a, box_b, mode='combinations', data_type=None):
                   (box_a[:, 3] - box_a[:, 1]))
         area_b = ((box_b[:, 2] - box_b[:, 0]) *
                   (box_b[:, 3] - box_b[:, 1]))
-        union = np.expand_dims(area_a, 0) + np.expand_dims(area_b, 1) - inter   # 合并的区域= area_a + area_b - 相交区域的面积
+        # union = np.expand_dims(area_a, 0) + np.expand_dims(area_b, 1) - inter   # 合并的区域= area_a + area_b - 相交区域的面积
 
         # torch.Tensor
         if data_type == torch.Tensor:
+            union = torch.unsqueeze(area_a, 0) + torch.unsqueeze(area_b, 1) - inter
             return (inter / union).permute(1, 0)
 
         # np.ndarray
         elif data_type == np.ndarray:
+            union = np.expand_dims(area_a, 0) + np.expand_dims(area_b, 1) - inter
             return (inter / union).T
 
         # unknown type

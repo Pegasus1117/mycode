@@ -38,6 +38,12 @@ def Config():
                                 conf.lr_policy, 'iter' + str(conf.max_iter),
                                 datetime.datetime.now().strftime("%Y.%m.%d-%H:%M:%S")]).replace('.', '_').replace(':', '_').replace('-', '_')
 
+    # pretrained 自己加的
+    # conf.pretrained = 'pretrain/model_40000_pkl'
+
+    # 遮挡模块
+    conf.occlusion = True
+    conf.threshold = 0.3
 
     # solver settings
     conf.solver_type = 'sgd'     # 随机梯度下降
@@ -45,7 +51,7 @@ def Config():
     conf.momentum = 0.9          # 超参数：动（冲）量：动量越大时，其转换为势能的能量也就越大，就越有可能摆脱局部凹域的束缚（跳过局部最优点），进入全局凹域。常设为0.9
     conf.weight_decay = 0.0005   # 权重衰减：防止过拟合
 
-    conf.snapshot_iter = 5000
+    conf.snapshot_iter = 50
     conf.display = 50
 
     
