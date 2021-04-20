@@ -56,9 +56,9 @@ class RPN_3D_loss(nn.Module):
 
         # self.active_max = 0
         # self.active_min = 10000
-        self.car_num_max = 0
-        self.car_num_min = 10000
-        self.now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # self.car_num_max = 0
+        # self.car_num_min = 10000
+        # self.now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.occlusion = conf.occlusion if "occlusion" in conf else False
         self.threshold = conf.threshold if "threshold" in conf else 1
@@ -99,7 +99,7 @@ class RPN_3D_loss(nn.Module):
         idx_sort = bbox3d_filter.argsort(0)[:, 2]
         # print("id_sort:\n", idx_sort)
 
-        # print("car_num_now: {}".format(idx_sort.shape[0]))
+        print("car_num_now: {}".format(idx_sort.shape[0]))
         # self.car_num_max = idx_sort.shape[0] if idx_sort.shape[0] > self.car_num_max else self.car_num_max
         # self.car_num_min = idx_sort.shape[0] if idx_sort.shape[0] < self.car_num_min else self.car_num_min
         # print("car_num_max: {} , car_num_min: {} ".format(self.car_num_max, self.car_num_min))
@@ -132,9 +132,10 @@ class RPN_3D_loss(nn.Module):
             # print("bbox3d_filter修正后:\n", bbox3d_filter)
 
         bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
-        # print("用了{}秒".format(time() - time_start))
+        print("用了{}秒".format(time() - time_start))
         # 将修改完的值返回给原数据
-        bbox_3d[idx_filter] = bbox3d_stack[-1]
+        if bbox3d_filter.shape[0] > 0:
+            bbox_3d[idx_filter] = bbox3d_stack[-1]
 
         # print("修改后的bbox_3d:\n", bbox_3d)
         return bbox_3d
@@ -839,7 +840,7 @@ class RPN_3D_loss(nn.Module):
                     loss_bbox_ry3d_occ = (loss_bbox_ry3d_occ * bbox_weights[active]).mean()
 
                     loss_3d_occ = loss_bbox_x3d_occ + loss_bbox_y3d_occ + loss_bbox_z3d_occ + loss_bbox_w3d_occ + loss_bbox_h3d_occ + loss_bbox_l3d_occ + loss_bbox_ry3d_occ
-                    print("loss_3d_occ: {}\n".format(loss_3d_occ))
+                    # print("loss_3d_occ: {}\n".format(loss_3d_occ))
                     stats.append({'name': 'occ', 'val': loss_3d_occ, 'format': '{:0.4f}', 'group': 'loss'})
                     loss += loss_3d_occ
 

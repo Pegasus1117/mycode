@@ -424,8 +424,8 @@ class RPN(nn.Module):
                 self.feat_size = [feat_h, feat_w]
                 self.rois = locate_anchors(self.anchors, self.feat_size, self.feat_stride, convert_tensor=True)
                 self.rois = self.rois.type(torch.cuda.FloatTensor)
-            # if self.occlusion:
-            #     return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois, occ_correct
+            if self.occlusion:
+                return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois, occ_correct
             return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois
 
 

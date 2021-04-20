@@ -18,6 +18,82 @@ import torch.nn.functional as F
 
 from copy import deepcopy
 
+def Occlusion(cls=None, bbox_2d=None, bbox_3d=None, threshold=0.3, occ_correct=None):
+    '''
+    cls: tensor.cuda, (bathsize, N, 4),
+    bbox_2d: tensor.cuda, (bathsize, N, 4),
+    bbox_3d: tensor.cuda, (bathsize, N, 7),
+    occ_correct: tensor.cuda, (7),
+    threshold: float in 0~1,
+    '''
+    # print("修改前的bbox_3d:\n", bbox_3d)
+
+    # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
+    typeEncode = torch.from_numpy(cls).cuda()
+    # print("typeEncode:", typeEncode)
+    tensor_ones = torch.ones(1).cuda().bool()
+    tensor_zeros = torch.zeros(1).cuda().bool()
+    idx_filter = torch.where(typeEncode == 1, tensor_ones, tensor_zeros)
+    # print("idx_filter:", idx_filter)
+
+    # 由索引过滤出类型为car的数据
+    bbox_2d = torch.from_numpy(bbox_2d).cuda()
+    bbox_3d = torch.from_numpy(bbox_3d).cuda()
+    bbox2d_filter = bbox_2d[idx_filter]
+    bbox3d_filter = bbox_3d[idx_filter]
+    bbox3d_stack = torch.zeros((bbox3d_filter.shape[0], bbox3d_filter.shape[0], 7)).type(torch.DoubleTensor).cuda()
+    if bbox3d_filter.shape[0] > 0:
+        bbox3d_stack[0] = bbox3d_filter
+    # print("bbox3d_stack.shape: {} type: {}".format(bbox3d_stack.shape, bbox3d_stack.type()))
+    # print("bbox3d_filter修正前:\n", bbox3d_filter)
+    # x,y,w,h --> x1,y1,x2,y2
+    bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
+    # print("bbox2d_filter的type: {}".format(type(bbox2d_filter)))
+
+    # 筛选后按深度大小排序
+    idx_sort = bbox3d_filter.argsort(0)[:, 2]
+    # print("id_sort:\n", idx_sort)
+
+    print("car_num_now: {}".format(idx_sort.shape[0]))
+    # self.car_num_max = idx_sort.shape[0] if idx_sort.shape[0] > self.car_num_max else self.car_num_max
+    # self.car_num_min = idx_sort.shape[0] if idx_sort.shape[0] < self.car_num_min else self.car_num_min
+    # print("car_num_max: {} , car_num_min: {} ".format(self.car_num_max, self.car_num_min))
+    # car_num_path = os.path.join(os.getcwd(), "output", "record", "car_num数记录_{}".format(self.now))
+    # with open(car_num_path, 'a') as f:
+    #     f.write("{}\n".format(idx_sort.shape[0]))
+
+    # print("occ_correct.shape:", occ_correct.shape)
+    # print("occ_correct:", occ_correct)
+
+    # 计算iou,判定遮挡关系,进行遮挡修正
+    time_start = time()
+    for count in range(0, idx_sort.shape[0] - 1):
+        # print("第 {} 次循环:".format(count))
+        iouValue = torch.zeros(bbox2d_filter.shape[0]).cuda()  # 初始化全部为0;
+        iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]], bbox2d_filter[idx_sort[count + 1:]])
+        # print("iouValue:", iouValue)
+
+        idx_occlusion = torch.where(iouValue > threshold, torch.ones(1).cuda().byte(),
+                                    torch.zeros(1).cuda().byte())
+        # print("遮挡关系:", idx_occlusion)
+        # print("当前值为:", bbox3d_filter[idx_sort[count]])
+        # print("occ_correct:", occ_correct)
+        correct_value = bbox3d_filter[idx_sort[count]] * occ_correct
+        # print("correct_value:", correct_value)
+        bbox3d_stack[count + 1] = bbox3d_stack[count]
+        bbox3d_stack[count + 1, idx_sort[idx_occlusion]] = bbox3d_stack[
+                                                               count, idx_sort[idx_occlusion]] + correct_value
+        # print("bbox3d_filter[idx_sort[idx_occlusion]]:", bbox3d_filter[idx_sort[idx_occlusion]])
+        # print("bbox3d_filter修正后:\n", bbox3d_filter)
+
+    bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
+    print("用了{}秒".format(time() - time_start))
+    # 将修改完的值返回给原数据
+    if bbox3d_filter.shape[0] > 0:
+        bbox_3d[idx_filter] = bbox3d_stack[-1]
+
+    # print("修改后的bbox_3d:\n", bbox_3d)
+    return bbox_3d
 
 def generate_anchors(conf, imdb, cache_folder):
     """
@@ -1374,12 +1450,17 @@ def im_detect_3d(im, depth, net, rpn_conf, preprocess, p2, gpu=0, synced=False):
 
     scale_factor = imH / imH_orig
 
+    occlusion = rpn_conf.occlusion if "occlusion" in rpn_conf else False
+    threshold = rpn_conf.threshold if "threshold" in rpn_conf else 1
+
     # if rpn_conf.corner_in_3d:
     #     cls, prob, bbox_2d, bbox_3d, feat_size, rois, bbox_vertices, corners_3d = net(im, depth)
     # elif rpn_conf.use_corner:
     #     cls, prob, bbox_2d, bbox_3d, feat_size, rois, bbox_vertices = net(im, depth)
-    # else:
-    cls, prob, bbox_2d, bbox_3d, feat_size, rois = net(im, degpth)
+    if occlusion:
+        cls, prob, bbox_2d, bbox_3d, feat_size, rois, occ_correct = net(im, depth)
+    else:
+        cls, prob, bbox_2d, bbox_3d, feat_size, rois = net(im, depth)
     '''
     txtpath = os.path.join(os.getcwd(), "单训练结果的记录")
     with open(txtpath, 'w') as f :
@@ -1524,11 +1605,14 @@ def im_detect_3d(im, depth, net, rpn_conf, preprocess, p2, gpu=0, synced=False):
         aboxes = aboxes[keep_inds, :]
 
     # clip boxes
-    if rpn_conf.clip_boxes:
+    if rpn_conf.clip_boxes:     # False
         aboxes[:, 0] = np.clip(aboxes[:, 0], 0, imW_orig - 1)
         aboxes[:, 1] = np.clip(aboxes[:, 1], 0, imH_orig - 1)
         aboxes[:, 2] = np.clip(aboxes[:, 2], 0, imW_orig - 1)
         aboxes[:, 3] = np.clip(aboxes[:, 3], 0, imH_orig - 1)
+
+    if occlusion:
+        aboxes[:, 6:13] = Occlusion(aboxes[:, 5], aboxes[:, 0:4], aboxes[:, 6:13], threshold, occ_correct).cpu().detach().numpy()
 
     return aboxes
 
@@ -1598,7 +1682,7 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
 
         # forward test batch
         aboxes = im_detect_3d(im, depth, net, rpn_conf, preprocess, p2)
-        # print('aboxes: {}, {}\n'.format(aboxes, aboxes.shape))
+        print('aboxes.shape: {}\n'.format(aboxes.shape))
 
         base_path, name, ext = file_parts(impath)
 
