@@ -18,45 +18,47 @@ class RPN_3D_loss(nn.Module):
 
         super(RPN_3D_loss, self).__init__()
 
-        self.num_classes = len(conf.lbls) + 1   # 4
-        self.num_anchors = conf.anchors.shape[0]    # 36
+        self.num_classes = len(conf.lbls) + 1  # 4
+        self.num_anchors = conf.anchors.shape[0]  # 36
         self.anchors = conf.anchors
         self.bbox_means = conf.bbox_means
         self.bbox_stds = conf.bbox_stds
-        self.feat_stride = conf.feat_stride     # 16
-        self.fg_fraction = conf.fg_fraction     # 0.20
-        self.box_samples = conf.box_samples     # 0.20
-        self.ign_thresh = conf.ign_thresh       # 0.5
-        self.nms_thres = conf.nms_thres         # 0.4
-        self.fg_thresh = conf.fg_thresh         # 0.5
-        self.bg_thresh_lo = conf.bg_thresh_lo   # 0
-        self.bg_thresh_hi = conf.bg_thresh_hi   # 1.0
-        self.best_thresh = conf.best_thresh     # 0.35
+        self.feat_stride = conf.feat_stride  # 16
+        self.fg_fraction = conf.fg_fraction  # 0.20
+        self.box_samples = conf.box_samples  # 0.20
+        self.ign_thresh = conf.ign_thresh  # 0.5
+        self.nms_thres = conf.nms_thres  # 0.4
+        self.fg_thresh = conf.fg_thresh  # 0.5
+        self.bg_thresh_lo = conf.bg_thresh_lo  # 0
+        self.bg_thresh_hi = conf.bg_thresh_hi  # 1.0
+        self.best_thresh = conf.best_thresh  # 0.35
         self.hard_negatives = conf.hard_negatives  # True
-        self.focal_loss = conf.focal_loss       # 1
+        self.focal_loss = conf.focal_loss  # 1
 
-        self.crop_size = conf.crop_size         # [512, 1760]
+        self.crop_size = conf.crop_size  # [512, 1760]
 
-        self.cls_2d_lambda = conf.cls_2d_lambda         # 1
-        self.iou_2d_lambda = conf.iou_2d_lambda         # 0
-        self.bbox_2d_lambda = conf.bbox_2d_lambda       # 1
-        self.bbox_3d_lambda = conf.bbox_3d_lambda       # 1
+        self.cls_2d_lambda = conf.cls_2d_lambda  # 1
+        self.iou_2d_lambda = conf.iou_2d_lambda  # 0
+        self.bbox_2d_lambda = conf.bbox_2d_lambda  # 1
+        self.bbox_3d_lambda = conf.bbox_3d_lambda  # 1
         self.bbox_3d_proj_lambda = conf.bbox_3d_proj_lambda  # 0.0
 
         self.lbls = conf.lbls
         self.ilbls = conf.ilbls
 
-        self.min_gt_vis = conf.min_gt_vis       # 0.65
-        self.min_gt_h = conf.min_gt_h           # 32.0
-        self.max_gt_h = conf.max_gt_h           # 384.0
+        self.min_gt_vis = conf.min_gt_vis  # 0.65
+        self.min_gt_h = conf.min_gt_h  # 32.0
+        self.max_gt_h = conf.max_gt_h  # 384.0
 
-        self.use_corner = conf.use_corner        # False
-        self.corner_in_3d = conf.corner_in_3d    # False
+        self.use_corner = conf.use_corner  # False
+        self.corner_in_3d = conf.corner_in_3d  # False
         self.use_hill_loss = conf.use_hill_loss  # False
 
         # self.active_max = 0
         # self.active_min = 10000
-        # self.now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.car_num_max = 0
+        self.car_num_min = 10000
+        self.now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.occlusion = conf.occlusion if "occlusion" in conf else False
         self.threshold = conf.threshold if "threshold" in conf else 1
@@ -71,24 +73,23 @@ class RPN_3D_loss(nn.Module):
         threshold: float in 0~1,
         '''
         # print("修改前的bbox_3d:\n", bbox_3d)
-        # bbox_3d_correct = torch.zeros_like(bbox_3d)
-        # bbox_3d_correct = torch.tensor(bbox_3d_correct, requires_grad=False)
-        # occ_correct = occ_correct.detach()
-
 
         # cls转化为类型编码,并由类型编码筛选出类型为car的数据的索引;
         typeEncode = torch.argmax(cls[:, :], 1) + 1
         # print("typeEncode:", typeEncode)
-        idx_filter = torch.where(typeEncode == 1, torch.ones(1).cuda().byte(), torch.zeros(1).cuda().byte())
-        idx_filter = idx_filter.bool()
+        tensor_ones = torch.ones(1).cuda().bool()
+        tensor_zeros = torch.zeros(1).cuda().bool()
+        idx_filter = torch.where(typeEncode == 1, tensor_ones, tensor_zeros)
         # print("idx_filter:", idx_filter)
 
         # 由索引过滤出类型为car的数据
         bbox2d_filter = bbox_2d[idx_filter]
-        # bbox2d_filter = torch.tensor(bbox2d_filter, requires_grad=False)
         bbox3d_filter = bbox_3d[idx_filter]
         bbox3d_filter = bbox3d_filter.detach()
-        # bbox3d_filter_tmp = bbox3d_filter.clone()
+        bbox3d_stack = torch.zeros((bbox3d_filter.shape[0], bbox3d_filter.shape[0], 7)).type(torch.FloatTensor).cuda()
+        if bbox3d_filter.shape[0] > 0:
+            bbox3d_stack[0] = bbox3d_filter
+        # print("bbox3d_stack.shape: {} type: {}".format(bbox3d_stack.shape, bbox3d_stack.type()))
         # print("bbox3d_filter修正前:\n", bbox3d_filter)
         # x,y,w,h --> x1,y1,x2,y2
         bbox2d_filter = bbXYWH2Coords(bbox2d_filter)
@@ -98,40 +99,48 @@ class RPN_3D_loss(nn.Module):
         idx_sort = bbox3d_filter.argsort(0)[:, 2]
         # print("id_sort:\n", idx_sort)
 
+        # print("car_num_now: {}".format(idx_sort.shape[0]))
+        # self.car_num_max = idx_sort.shape[0] if idx_sort.shape[0] > self.car_num_max else self.car_num_max
+        # self.car_num_min = idx_sort.shape[0] if idx_sort.shape[0] < self.car_num_min else self.car_num_min
+        # print("car_num_max: {} , car_num_min: {} ".format(self.car_num_max, self.car_num_min))
+        # car_num_path = os.path.join(os.getcwd(), "output", "record", "car_num数记录_{}".format(self.now))
+        # with open(car_num_path, 'a') as f:
+        #     f.write("{}\n".format(idx_sort.shape[0]))
+
+        # print("occ_correct.shape:", occ_correct.shape)
+        # print("occ_correct:", occ_correct)
+
         # 计算iou,判定遮挡关系,进行遮挡修正
         time_start = time()
         for count in range(0, idx_sort.shape[0] - 1):
             # print("第 {} 次循环:".format(count))
             iouValue = torch.zeros(bbox2d_filter.shape[0]).cuda()  # 初始化全部为0;
-
-            iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]],
-                                       bbox2d_filter[idx_sort[count + 1:]])
+            iouValue[count + 1:] = iou(bbox2d_filter[idx_sort[count:count + 1]], bbox2d_filter[idx_sort[count + 1:]])
             # print("iouValue:", iouValue)
+
             idx_occlusion = torch.where(iouValue > threshold, torch.ones(1).cuda().byte(),
                                         torch.zeros(1).cuda().byte())
             # print("遮挡关系:", idx_occlusion)
             # print("当前值为:", bbox3d_filter[idx_sort[count]])
             # print("occ_correct:", occ_correct)
-            # print("bbox3d_filter.grad_fn:", bbox3d_filter.grad_fn)
-            correct_value = bbox3d_filter[idx_sort[count]].detach() * occ_correct
+            correct_value = bbox3d_filter[idx_sort[count]] * occ_correct
             # print("correct_value:", correct_value)
-            bbox3d_filter[idx_sort[idx_occlusion]] = bbox3d_filter[idx_sort[
-                idx_occlusion]] + correct_value  # 用'='表示返回的是修正值,用'+='返回的是修改后的值;
+            bbox3d_stack[count + 1] = bbox3d_stack[count]
+            bbox3d_stack[count + 1, idx_sort[idx_occlusion]] = bbox3d_stack[
+                                                                   count, idx_sort[idx_occlusion]] + correct_value
             # print("bbox3d_filter[idx_sort[idx_occlusion]]:", bbox3d_filter[idx_sort[idx_occlusion]])
             # print("bbox3d_filter修正后:\n", bbox3d_filter)
 
         bbox2d_filter = bbCoords2XYWH(bbox2d_filter)  # 变回x,y,w,h模式,其实这一步不太需要,因为从始至终都没改变bbox_2d的值;
-        print("用了{}秒".format(time() - time_start))
+        # print("用了{}秒".format(time() - time_start))
         # 将修改完的值返回给原数据
-        # bbox_3d_correct[bs, idx_filter] = bbox3d_filter - bbox3d_filter_tmp
-        bbox_3d[idx_filter] = bbox3d_filter
-
-        # bbox_3d = bbox_3d + bbox_3d_correct
+        bbox_3d[idx_filter] = bbox3d_stack[-1]
 
         # print("修改后的bbox_3d:\n", bbox_3d)
         return bbox_3d
 
-    def forward(self, cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, bbox_vertices=None, corners_3d=None, occ_correct=None):
+    def forward(self, cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, bbox_vertices=None, corners_3d=None,
+                occ_correct=None):
 
         stats = []
         loss = torch.tensor(0).type(torch.cuda.FloatTensor)
@@ -193,16 +202,18 @@ class RPN_3D_loss(nn.Module):
         coords_abs_ry = torch.zeros(cls.shape[0:2])
         '''获取所有感兴趣区域'''
         # get all rois
-        rois = locate_anchors(self.anchors, feat_size, self.feat_stride, convert_tensor=True)   # (36*32*106=122112,5)
+        rois = locate_anchors(self.anchors, feat_size, self.feat_stride, convert_tensor=True)  # (36*32*106=122112,5)
         # print('rois:', rois.shape)  # (w * h * anchor_num) * 5, the fifth is the index 0-35
         # [ 1.4635e+03,  3.1150e+02,  2.0395e+03,  6.9550e+02,  3.5000e+01]
         # print('anchors:', self.anchors.shape)  # 36 * 9
         rois = rois.type(torch.cuda.FloatTensor)
         '''将ROIS和Ground Truth的相关均值与方差关系‘加’给训练结果'''
         # de-mean std
-        bbox_x3d_dn = bbox_x3d * self.bbox_stds[:, 4][0] + self.bbox_means[:, 4][0]  # bbox_x3d数据来自训练网络得到的结果，bbox_stds与bbox_means是生成的rois相对于对应的ground truth相对误差的平均值与方差；
-        bbox_y3d_dn = bbox_y3d * self.bbox_stds[:, 5][0] + self.bbox_means[:, 5][0]  #　乘方差加均值，这样操作的的意义是什么？？
-        bbox_z3d_dn = bbox_z3d * self.bbox_stds[:, 6][0] + self.bbox_means[:, 6][0]  # 语法分析：bbox_stds[:, 5][0],后面为什么要加[0]？因为索引出的为数组类型，要加[0]后，读出的为数字；不加没问题（最新版Python）；
+        bbox_x3d_dn = bbox_x3d * self.bbox_stds[:, 4][0] + self.bbox_means[:, 4][
+            0]  # bbox_x3d数据来自训练网络得到的结果，bbox_stds与bbox_means是生成的rois相对于对应的ground truth相对误差的平均值与方差；
+        bbox_y3d_dn = bbox_y3d * self.bbox_stds[:, 5][0] + self.bbox_means[:, 5][0]  # 乘方差加均值，这样操作的的意义是什么？？
+        bbox_z3d_dn = bbox_z3d * self.bbox_stds[:, 6][0] + self.bbox_means[:, 6][
+            0]  # 语法分析：bbox_stds[:, 5][0],后面为什么要加[0]？因为索引出的为数组类型，要加[0]后，读出的为数字；不加没问题（最新版Python）；
         bbox_w3d_dn = bbox_w3d * self.bbox_stds[:, 7][0] + self.bbox_means[:, 7][0]
         bbox_h3d_dn = bbox_h3d * self.bbox_stds[:, 8][0] + self.bbox_means[:, 8][0]
         bbox_l3d_dn = bbox_l3d * self.bbox_stds[:, 9][0] + self.bbox_means[:, 9][0]
@@ -219,7 +230,7 @@ class RPN_3D_loss(nn.Module):
         ctr_y = rois[:, 1] + 0.5 * heights
         '''在上一步的基础上，把ROIS中的一些信息‘加’给训练结果'''
         # de-normalization
-        bbox_x3d_dn = bbox_x3d_dn * widths.unsqueeze(0) + ctr_x.unsqueeze(0)    # 看论文
+        bbox_x3d_dn = bbox_x3d_dn * widths.unsqueeze(0) + ctr_x.unsqueeze(0)  # 看论文
         bbox_y3d_dn = bbox_y3d_dn * heights.unsqueeze(0) + ctr_y.unsqueeze(0)
         bbox_z3d_dn = src_anchors[:, 4].unsqueeze(0) + bbox_z3d_dn
         bbox_w3d_dn = torch.exp(bbox_w3d_dn) * src_anchors[:, 5].unsqueeze(0)
@@ -279,13 +290,16 @@ class RPN_3D_loss(nn.Module):
 
                 else:
                     transforms, ols, raw_gt = compute_targets(gts_val, gts_ign, box_lbls, rois.numpy(), self.fg_thresh,
-                                                      self.ign_thresh, self.bg_thresh_lo, self.bg_thresh_hi,
-                                                      self.best_thresh, anchors=self.anchors,  gts_3d=gts_3d,
-                                                      tracker=rois[:, 4].numpy())
+                                                              self.ign_thresh, self.bg_thresh_lo, self.bg_thresh_hi,
+                                                              self.best_thresh, anchors=self.anchors, gts_3d=gts_3d,
+                                                              tracker=rois[:, 4].numpy())
 
                 if self.use_hill_loss:  # False
                     hill_deltas_2d = transforms[:, 0:4]
-                    hill_coords_2d[bind, :, :] = bbox_transform_inv(rois, torch.from_numpy(hill_deltas_2d), means=self.bbox_means[0, :], stds=self.bbox_stds[0, :]).cpu().numpy() / imobj['scale_factor']
+                    hill_coords_2d[bind, :, :] = bbox_transform_inv(rois, torch.from_numpy(hill_deltas_2d),
+                                                                    means=self.bbox_means[0, :],
+                                                                    stds=self.bbox_stds[0, :]).cpu().numpy() / imobj[
+                                                     'scale_factor']
 
                     hill_p2[bind, :, :, :] = p2
 
@@ -296,13 +310,17 @@ class RPN_3D_loss(nn.Module):
                     hill_h3d = bbox_h3d_dn[bind]
                     hill_l3d = bbox_l3d_dn[bind]
                     hill_ry3d = bbox_ry3d_dn[bind]
-                    hill_coord3d = p2_inv.mm(torch.cat((hill_x3d * hill_z3d, hill_y3d * hill_z3d, hill_z3d, torch.ones_like(hill_x3d)), dim=0))  # # (4, 126720) # 36 * 110 * 32
+                    hill_coord3d = p2_inv.mm(
+                        torch.cat((hill_x3d * hill_z3d, hill_y3d * hill_z3d, hill_z3d, torch.ones_like(hill_x3d)),
+                                  dim=0))  # # (4, 126720) # 36 * 110 * 32
                     hill_cx3d = hill_coord3d[0]
                     hill_cy3d = hill_coord3d[1]
                     hill_cz3d = hill_coord3d[2]
                     hill_ry3d = convertAlpha2Rot_torch(hill_ry3d, hill_cz3d, hill_cx3d)
 
-                    hill_3d_all = torch.cat((hill_cx3d.unsqueeze(1), hill_cy3d.unsqueeze(1), hill_cz3d.unsqueeze(1), hill_w3d.unsqueeze(1), hill_h3d.unsqueeze(1), hill_l3d.unsqueeze(1), hill_ry3d.unsqueeze(1)), dim=1)
+                    hill_3d_all = torch.cat((hill_cx3d.unsqueeze(1), hill_cy3d.unsqueeze(1), hill_cz3d.unsqueeze(1),
+                                             hill_w3d.unsqueeze(1), hill_h3d.unsqueeze(1), hill_l3d.unsqueeze(1),
+                                             hill_ry3d.unsqueeze(1)), dim=1)
                     hill_3d[bind, :, :] = hill_3d_all
 
                 # normalize 2d
@@ -328,11 +346,11 @@ class RPN_3D_loss(nn.Module):
                 labels_bg = transforms[:, 4] < 0
                 labels_ign = transforms[:, 4] == 0
 
-                fg_inds = np.flatnonzero(labels_fg)     # np.flatnonzero返回扁平化后矩阵中非零元素的位置（index）
+                fg_inds = np.flatnonzero(labels_fg)  # np.flatnonzero返回扁平化后矩阵中非零元素的位置（index）
                 bg_inds = np.flatnonzero(labels_bg)
                 ign_inds = np.flatnonzero(labels_ign)
 
-                transforms = torch.from_numpy(transforms)#.cuda()
+                transforms = torch.from_numpy(transforms)  # .cuda()
 
                 labels[bind, fg_inds] = transforms[fg_inds, 4]
                 labels[bind, ign_inds] = IGN_FLAG
@@ -372,10 +390,10 @@ class RPN_3D_loss(nn.Module):
                     bg_num = len(bg_inds)
 
                 else:
-                    fg_num = min(round(rois.shape[0]*self.box_samples * self.fg_fraction), len(fg_inds))
-                    bg_num = min(round(rois.shape[0]*self.box_samples - fg_num), len(bg_inds))
+                    fg_num = min(round(rois.shape[0] * self.box_samples * self.fg_fraction), len(fg_inds))
+                    bg_num = min(round(rois.shape[0] * self.box_samples - fg_num), len(bg_inds))
 
-                if self.hard_negatives:         # True
+                if self.hard_negatives:  # True
                     # 若fg_num<fg_inds.shape[0],从fg_inds中截取scores最高的fg_num个值；
                     if fg_num > 0 and fg_num != fg_inds.shape[0]:
                         scores = prob_detach[bind, fg_inds, labels[bind, fg_inds].astype(int)]
@@ -433,7 +451,8 @@ class RPN_3D_loss(nn.Module):
                     bbox_x3d_dn_fg = bbox_x3d_dn[bind, fg_inds]
                     bbox_y3d_dn_fg = bbox_y3d_dn[bind, fg_inds]
 
-                    src_anchors = self.anchors[rois[fg_inds, 4].type(torch.cuda.LongTensor).cpu(), :] # 扩展anchors数据使其与预测数据同形状且对应
+                    src_anchors = self.anchors[rois[fg_inds, 4].type(torch.cuda.LongTensor).cpu(),
+                                  :]  # 扩展anchors数据使其与预测数据同形状且对应
                     src_anchors = torch.tensor(src_anchors, requires_grad=False).type(torch.cuda.FloatTensor)
                     if len(src_anchors.shape) == 1: src_anchors = src_anchors.unsqueeze(0)
 
@@ -450,7 +469,9 @@ class RPN_3D_loss(nn.Module):
                     bbox_x3d_dn_fg /= imobj['scale_factor']
                     bbox_y3d_dn_fg /= imobj['scale_factor']
 
-                    coords_2d = torch.cat((bbox_x3d_dn_fg[np.newaxis,:] * bbox_z3d_dn_fg[np.newaxis,:], bbox_y3d_dn_fg[np.newaxis,:] * bbox_z3d_dn_fg[np.newaxis,:], bbox_z3d_dn_fg[np.newaxis,:]), dim=0)
+                    coords_2d = torch.cat((bbox_x3d_dn_fg[np.newaxis, :] * bbox_z3d_dn_fg[np.newaxis, :],
+                                           bbox_y3d_dn_fg[np.newaxis, :] * bbox_z3d_dn_fg[np.newaxis, :],
+                                           bbox_z3d_dn_fg[np.newaxis, :]), dim=0)
                     coords_2d = torch.cat((coords_2d, torch.ones([1, coords_2d.shape[1]])), dim=0)
 
                     coords_3d = torch.mm(p2_inv, coords_2d)
@@ -465,7 +486,8 @@ class RPN_3D_loss(nn.Module):
                     bbox_z3d_dn_tar = torch.tensor(bbox_z3d_dn_tar, requires_grad=False).type(torch.cuda.FloatTensor)
                     bbox_z3d_dn_tar = src_anchors[:, 4] + bbox_z3d_dn_tar
 
-                    bbox_ry3d_dn_tar = bbox_ry3d_tar[bind, fg_inds] * self.bbox_stds[:, 10][0] + self.bbox_means[:, 10][0]
+                    bbox_ry3d_dn_tar = bbox_ry3d_tar[bind, fg_inds] * self.bbox_stds[:, 10][0] + self.bbox_means[:, 10][
+                        0]
                     bbox_ry3d_dn_tar = torch.tensor(bbox_ry3d_dn_tar, requires_grad=False).type(torch.cuda.FloatTensor)
                     bbox_ry3d_dn_tar = src_anchors[:, 8] + bbox_ry3d_dn_tar
 
@@ -476,8 +498,10 @@ class RPN_3D_loss(nn.Module):
 
                 bg_inds = np.arange(0, rois.shape[0])
 
-                if self.box_samples == np.inf: bg_num = len(bg_inds)
-                else: bg_num = min(round(self.box_samples * (1 - self.fg_fraction)), len(bg_inds))
+                if self.box_samples == np.inf:
+                    bg_num = len(bg_inds)
+                else:
+                    bg_num = min(round(self.box_samples * (1 - self.fg_fraction)), len(bg_inds))
 
                 if self.hard_negatives:
 
@@ -493,10 +517,8 @@ class RPN_3D_loss(nn.Module):
                     if bg_num > 0 and bg_num != bg_inds.shape[0]:
                         bg_inds = np.random.choice(bg_inds, bg_num, replace=False)
 
-
                 labels[bind, :] = 0
                 labels_weight[bind, bg_inds] = BG_ENC
-
 
             # grab label predictions (for weighing purposes)
             active = labels[bind, :] != IGN_FLAG
@@ -543,11 +565,11 @@ class RPN_3D_loss(nn.Module):
 
         labels_weight[active_inds_unravel] = 1.0
 
-        if self.fg_fraction is not None:    # 0.2
+        if self.fg_fraction is not None:  # 0.2
 
             if fg_num > 0:
 
-                fg_weight = (self.fg_fraction /(1 - self.fg_fraction)) * (bg_num / fg_num)
+                fg_weight = (self.fg_fraction / (1 - self.fg_fraction)) * (bg_num / fg_num)
                 labels_weight[fg_inds_unravel] = fg_weight  # large for foreground
                 labels_weight[bg_inds_unravel] = 1.0
 
@@ -559,7 +581,7 @@ class RPN_3D_loss(nn.Module):
         # hence, encourages the network to get all "correct" rather than
         # becoming more correct at a decision it is already good at
         # this method is equivelent to the focal loss with additional mean scaling
-        if self.focal_loss:     # 1
+        if self.focal_loss:  # 1
 
             weights_sum = 0
 
@@ -577,14 +599,13 @@ class RPN_3D_loss(nn.Module):
                 weights_sum += np.sum(fg_weights)
                 labels_weight[fg_inds_unravel] *= fg_weights
 
-
         # ----------------------------------------
         # classification loss
         # ----------------------------------------
-        labels = torch.tensor(labels, requires_grad=False)      # 存放的是所有预测结果对应的真实值中的种类编码
+        labels = torch.tensor(labels, requires_grad=False)  # 存放的是所有预测结果对应的真实值中的种类编码
         labels = labels.view(-1).type(torch.cuda.LongTensor)
 
-        labels_weight = torch.tensor(labels_weight, requires_grad=False)    # 前后景的权重
+        labels_weight = torch.tensor(labels_weight, requires_grad=False)  # 前后景的权重
         labels_weight = labels_weight.view(-1).type(torch.cuda.FloatTensor)
 
         cls = cls.view(-1, cls.shape[2])  # cls.shape[2]=4,为种类编码；
@@ -622,7 +643,7 @@ class RPN_3D_loss(nn.Module):
 
             active = bbox_weights > 0
 
-            if self.bbox_2d_lambda:     # 1
+            if self.bbox_2d_lambda:  # 1
 
                 # bbox loss 2d
                 bbox_x_tar = torch.tensor(bbox_x_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1)
@@ -665,10 +686,11 @@ class RPN_3D_loss(nn.Module):
                 loss += bbox_2d_loss
                 stats.append({'name': 'bbox_2d', 'val': bbox_2d_loss, 'format': '{:0.4f}', 'group': 'loss'})
 
-            if self.use_hill_loss:    # False
+            if self.use_hill_loss:  # False
                 hill_loss = 0
                 # print(hill_3d.view(-1, 7).size(), active.size())
-                hill_coords_2d = torch.tensor(hill_coords_2d, requires_grad=False).type(torch.FloatTensor).cuda().view(-1, 4)[active]
+                hill_coords_2d = \
+                    torch.tensor(hill_coords_2d, requires_grad=False).type(torch.FloatTensor).cuda().view(-1, 4)[active]
                 hill_p2 = hill_p2.view(-1, 4, 4)[active]
                 hill_3d = hill_3d.view(-1, 7)[active]
                 for index in range(hill_3d.size()[0]):
@@ -682,12 +704,12 @@ class RPN_3D_loss(nn.Module):
                     R[1, 1] += 1
                     # print(R)
                     corners = torch.zeros(torch.Size((3, 8)))
-                    corners[0, 1:5] += c3d[5]/2
-                    corners[0, [0, 5, 6, 7]] -= c3d[5]/2
-                    corners[1, [2, 3, 6, 7]] += c3d[4]/2
-                    corners[1, [0, 1, 4, 5]] -= c3d[4]/2
-                    corners[2, 3:7] += c3d[3]/2
-                    corners[2, [0, 1, 2, 7]] -= c3d[3]/2
+                    corners[0, 1:5] += c3d[5] / 2
+                    corners[0, [0, 5, 6, 7]] -= c3d[5] / 2
+                    corners[1, [2, 3, 6, 7]] += c3d[4] / 2
+                    corners[1, [0, 1, 4, 5]] -= c3d[4] / 2
+                    corners[2, 3:7] += c3d[3] / 2
+                    corners[2, [0, 1, 2, 7]] -= c3d[3] / 2
                     corners = R.mm(corners)
                     corners[0, :] += c3d[0]
                     corners[1, :] += c3d[1]
@@ -704,30 +726,33 @@ class RPN_3D_loss(nn.Module):
                     # print(hill_coords_2d[index])
 
                     hill_loss += (F.smooth_l1_loss(x_new, hill_coords_2d[index][0], reduction='none') + \
-                                 F.smooth_l1_loss(y_new, hill_coords_2d[index][1], reduction='none') +\
-                                 F.smooth_l1_loss(x2_new, hill_coords_2d[index][2], reduction='none') +\
-                                 F.smooth_l1_loss(y2_new, hill_coords_2d[index][3], reduction='none'))
+                                  F.smooth_l1_loss(y_new, hill_coords_2d[index][1], reduction='none') + \
+                                  F.smooth_l1_loss(x2_new, hill_coords_2d[index][2], reduction='none') + \
+                                  F.smooth_l1_loss(y2_new, hill_coords_2d[index][3], reduction='none'))
                 hill_loss = hill_loss / hill_3d.size()[0] / 1000  # 2.5 pixel, 0.01 loss
                 loss += hill_loss * self.use_hill_loss
                 stats.append({'name': 'hill_loss', 'val': hill_loss, 'format': '{:0.4f}', 'group': 'loss'})
 
             if self.use_corner:
-                bbox_vertices_depth_tar = torch.tensor(bbox_vertices_depth_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1, 24)
+                bbox_vertices_depth_tar = torch.tensor(bbox_vertices_depth_tar, requires_grad=False).type(
+                    torch.FloatTensor).cuda().view(-1, 24)
                 bbox_vertices = bbox_vertices.view(-1, 24)
-                loss_vertices = F.smooth_l1_loss(bbox_vertices[active], bbox_vertices_depth_tar[active], reduction='none')
+                loss_vertices = F.smooth_l1_loss(bbox_vertices[active], bbox_vertices_depth_tar[active],
+                                                 reduction='none')
                 loss_vertices = (loss_vertices * bbox_weights[active].view(-1, 1)).mean()
                 loss += loss_vertices * self.use_corner
                 stats.append({'name': 'loss_vertices', 'val': loss_vertices, 'format': '{:0.4f}', 'group': 'loss'})
 
             if self.corner_in_3d:
-                bbox_3d_corners_tar = torch.tensor(bbox_3d_corners_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1, 18)
+                bbox_3d_corners_tar = torch.tensor(bbox_3d_corners_tar, requires_grad=False).type(
+                    torch.FloatTensor).cuda().view(-1, 18)
                 corners_3d = corners_3d.view(-1, 18)
                 loss_corners_3d = F.smooth_l1_loss(corners_3d[active], bbox_3d_corners_tar[active], reduction='none')
                 loss_corners_3d = (loss_corners_3d * bbox_weights[active].view(-1, 1)).mean()
                 loss += loss_corners_3d * self.corner_in_3d
                 stats.append({'name': 'loss_corners_3d', 'val': loss_corners_3d, 'format': '{:0.4f}', 'group': 'loss'})
 
-            if self.bbox_3d_lambda:     # 1
+            if self.bbox_3d_lambda:  # 1
 
                 # bbox loss 3d
                 bbox_x3d_tar = torch.tensor(bbox_x3d_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1)
@@ -773,15 +798,18 @@ class RPN_3D_loss(nn.Module):
 
                 if self.occlusion:
                     # 数据准备
-                    bbox_3d_occ = torch.stack((bbox_x3d[active], bbox_y3d[active], bbox_z3d[active], bbox_w3d[active], bbox_h3d[active], bbox_l3d[active], bbox_ry3d[active]), 1)
+                    bbox_3d_occ = torch.stack((bbox_x3d[active], bbox_y3d[active], bbox_z3d[active], bbox_w3d[active],
+                                               bbox_h3d[active], bbox_l3d[active], bbox_ry3d[active]), 1)
                     # print("bbox_x3d.shape: {}".format(bbox_x3d[active].shape))
-                    print("bbox_3d_occ.shape: {}".format(bbox_3d_occ.shape))
+                    # print("bbox_3d_occ.shape: {}".format(bbox_3d_occ.shape))
                     # print("bbox_x3d:\n{}".format(bbox_x3d[active]))
                     # print("bbox_x3d:\n{}".format(bbox_3d_occ[:, 0]))
                     bbox_2d_occ = torch.stack((bbox_x[active], bbox_y[active], bbox_w[active], bbox_h[active]), 1)
-                    print("bbox_2d_occ.shape: {}".format(bbox_2d_occ.shape))
+                    # print("bbox_2d_occ.shape: {}".format(bbox_2d_occ.shape))
                     cls_occ = cls[active]
-                    print("cls_occ.shape: {}".format(cls_occ.shape))
+                    # occ_correct_active = occ_correct[0, range(bbox_x[active].shape[0]), :]
+                    # print("======\ncls_occ.shape: {}".format(cls_occ.shape))
+                    # print("occ_correct_active.shape: ", occ_correct_active.shape)
 
                     bbox_3d_occ = self.Occlusion(cls_occ, bbox_2d_occ, bbox_3d_occ, self.threshold, occ_correct)
                     # print("bbox_3d_occ.shape: {}\n".format(bbox_3d_occ.shape))
@@ -812,22 +840,29 @@ class RPN_3D_loss(nn.Module):
 
                     loss_3d_occ = loss_bbox_x3d_occ + loss_bbox_y3d_occ + loss_bbox_z3d_occ + loss_bbox_w3d_occ + loss_bbox_h3d_occ + loss_bbox_l3d_occ + loss_bbox_ry3d_occ
                     print("loss_3d_occ: {}\n".format(loss_3d_occ))
+                    stats.append({'name': 'occ', 'val': loss_3d_occ, 'format': '{:0.4f}', 'group': 'loss'})
+                    loss += loss_3d_occ
 
-
-            if self.bbox_3d_proj_lambda:    # 0
+            if self.bbox_3d_proj_lambda:  # 0
 
                 # bbox loss 3d
-                bbox_x3d_proj_tar = torch.tensor(bbox_x3d_proj_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1)
-                bbox_y3d_proj_tar = torch.tensor(bbox_y3d_proj_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1)
-                bbox_z3d_proj_tar = torch.tensor(bbox_z3d_proj_tar, requires_grad=False).type(torch.FloatTensor).cuda().view(-1)
+                bbox_x3d_proj_tar = torch.tensor(bbox_x3d_proj_tar, requires_grad=False).type(
+                    torch.FloatTensor).cuda().view(-1)
+                bbox_y3d_proj_tar = torch.tensor(bbox_y3d_proj_tar, requires_grad=False).type(
+                    torch.FloatTensor).cuda().view(-1)
+                bbox_z3d_proj_tar = torch.tensor(bbox_z3d_proj_tar, requires_grad=False).type(
+                    torch.FloatTensor).cuda().view(-1)
 
                 bbox_x3d_proj = bbox_x3d_proj[:, :].view(-1)
                 bbox_y3d_proj = bbox_y3d_proj[:, :].view(-1)
                 bbox_z3d_proj = bbox_z3d_proj[:, :].view(-1)
 
-                loss_bbox_x3d_proj = F.smooth_l1_loss(bbox_x3d_proj[active], bbox_x3d_proj_tar[active], reduction='none')
-                loss_bbox_y3d_proj = F.smooth_l1_loss(bbox_y3d_proj[active], bbox_y3d_proj_tar[active], reduction='none')
-                loss_bbox_z3d_proj = F.smooth_l1_loss(bbox_z3d_proj[active], bbox_z3d_proj_tar[active], reduction='none')
+                loss_bbox_x3d_proj = F.smooth_l1_loss(bbox_x3d_proj[active], bbox_x3d_proj_tar[active],
+                                                      reduction='none')
+                loss_bbox_y3d_proj = F.smooth_l1_loss(bbox_y3d_proj[active], bbox_y3d_proj_tar[active],
+                                                      reduction='none')
+                loss_bbox_z3d_proj = F.smooth_l1_loss(bbox_z3d_proj[active], bbox_z3d_proj_tar[active],
+                                                      reduction='none')
 
                 loss_bbox_x3d_proj = (loss_bbox_x3d_proj * bbox_weights[active]).mean()
                 loss_bbox_y3d_proj = (loss_bbox_y3d_proj * bbox_weights[active]).mean()

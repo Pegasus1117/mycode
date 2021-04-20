@@ -149,8 +149,6 @@ def main(argv):
         elif conf.use_corner:
             det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, bbox_vertices)
         elif conf.occlusion:
-            # print("occ_correct:", occ_correct)
-            # print("occ_correct.shape:", occ_correct.shape)
             det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size, occ_correct=occ_correct)
         else:
             det_loss, det_stats = criterion_det(cls, prob, bbox_2d, bbox_3d, imobjs, feat_size)

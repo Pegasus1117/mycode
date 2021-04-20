@@ -242,6 +242,7 @@ class RPN(nn.Module):
 
         # 遮挡模块:
         if self.occlusion:
+            self.occ_correct = nn.Conv2d(self.prop_feats[0].out_channels, 7, 1)
             self.occ_correct = nn.Conv2d(self.prop_feats[0].out_channels, self.num_anchors, 1)
             self.avg_pool = nn.AdaptiveMaxPool2d((1, 1))
             self.fc1 = nn.Linear(self.occ_correct.out_channels, 133)
@@ -392,12 +393,15 @@ class RPN(nn.Module):
         # 遮挡模块:
         if self.occlusion:
             occ_correct = self.occ_correct(prop_feats)
+            # occ_correct = occ_correct.view(batch_size, -1, 7)
             # occ = torch.flatten(occ.view(batch_size, 1, feat_h * self.num_anchors*feat_w, 7), 1, 2)
             # print("原始的occ.shape：\n", occ.shape)
+
             occ_correct = self.avg_pool(occ_correct)
             occ_correct = occ_correct.view(occ_correct.size(0), -1)
             occ_correct = self.fc1(occ_correct)
             occ_correct = self.fc2(occ_correct)
+
             # occ_correct = occ_correct.view(-1)
             # print("occ_correct: ", occ_correct)
             # print("occ_correct.shape: ", occ_correct.shape)
@@ -420,8 +424,8 @@ class RPN(nn.Module):
                 self.feat_size = [feat_h, feat_w]
                 self.rois = locate_anchors(self.anchors, self.feat_size, self.feat_stride, convert_tensor=True)
                 self.rois = self.rois.type(torch.cuda.FloatTensor)
-            if self.occlusion:
-                return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois, occ_correct
+            # if self.occlusion:
+            #     return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois, occ_correct
             return cls, prob, bbox_2d, bbox_3d, feat_size, self.rois
 
 

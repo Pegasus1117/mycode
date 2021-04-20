@@ -1379,7 +1379,7 @@ def im_detect_3d(im, depth, net, rpn_conf, preprocess, p2, gpu=0, synced=False):
     # elif rpn_conf.use_corner:
     #     cls, prob, bbox_2d, bbox_3d, feat_size, rois, bbox_vertices = net(im, depth)
     # else:
-    cls, prob, bbox_2d, bbox_3d, feat_size, rois = net(im, depth)
+    cls, prob, bbox_2d, bbox_3d, feat_size, rois = net(im, degpth)
     '''
     txtpath = os.path.join(os.getcwd(), "单训练结果的记录")
     with open(txtpath, 'w') as f :
